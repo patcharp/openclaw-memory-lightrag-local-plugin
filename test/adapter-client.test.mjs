@@ -32,7 +32,7 @@ function okJson(data) {
   };
 }
 
-test("query uses configured mode and topK", async (t) => {
+test("query always uses naive mode and sends stable body", async (t) => {
   t.after(() => {
     globalThis.fetch = ORIGINAL_FETCH;
   });
@@ -51,17 +51,45 @@ test("query uses configured mode and topK", async (t) => {
         chunks: [{ content: "chunk text", file_path: "doc.md", chunk_id: "c1", reference_id: "r1" }],
         references: [],
       },
-      metadata: { query_mode: "mix" },
+      metadata: { query_mode: "naive" },
     });
   }, "mix");
 
   const result = await client.query("what is this", 3, { conversationId: "telegram:1" });
 
-  assert.equal(capturedBody.mode, "mix");
+  assert.equal(capturedBody.mode, "naive");
   assert.equal(capturedBody.top_k, 3);
-  assert.equal(capturedBody.chunk_top_k, 3);
+  assert.equal(Object.hasOwn(capturedBody, "chunk_top_k"), false);
   assert.equal(result.contextItems.length, 1);
   assert.equal(result.contextItems[0].text, "chunk text");
+});
+
+test("query propagates 500 errors from /query/data without retry", async (t) => {
+  t.after(() => {
+    globalThis.fetch = ORIGINAL_FETCH;
+  });
+
+  let call = 0;
+  const client = makeClient(async (url, init) => {
+    assert.equal(url, "http://127.0.0.1:9621/query/data");
+    assert.equal(init.method, "POST");
+    call += 1;
+    const body = JSON.parse(String(init.body));
+    assert.deepEqual(Object.keys(body).sort(), ["mode", "query", "top_k"]);
+    return {
+      ok: false,
+      status: 500,
+      text: async () =>
+        '{"detail":"4 validation errors for QueryDataResponse\\nstatus\\n Field required [type=missing, input_value={}, input_type=dict]"}',
+      json: async () => ({}),
+    };
+  });
+
+  await assert.rejects(
+    () => client.query("retry me", 4, { conversationId: "telegram:retry" }),
+    /request failed: 500/,
+  );
+  assert.equal(call, 1);
 });
 
 test("ingest sends unique file_sources for each item", async (t) => {

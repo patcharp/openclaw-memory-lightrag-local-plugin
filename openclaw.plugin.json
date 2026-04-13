@@ -41,7 +41,7 @@
     },
     "queryMode": {
       "label": "Query Mode",
-      "help": "LightRAG query strategy. mix (default) combines knowledge graph + vector search",
+      "help": "LightRAG query strategy. Fixed to naive for stable /query/data response",
       "advanced": true
     },
     "debug": {
@@ -94,9 +94,9 @@
       },
       "queryMode": {
         "type": "string",
-        "enum": ["local", "global", "hybrid", "naive", "mix", "bypass"],
-        "description": "LightRAG query mode. mix combines knowledge graph + vector search (recommended)",
-        "default": "mix"
+        "enum": ["naive"],
+        "description": "LightRAG query mode. Fixed to naive for /query/data stability",
+        "default": "naive"
       },
       "debug": {
         "type": "boolean",

@@ -4,10 +4,10 @@ This plugin integrates a **LightRAG Server** directly into OpenClaw as a memory 
 
 ## Features
 
-- **Semantic memory search** via LightRAG Server REST API (knowledge graph + vector search).
+- **Semantic memory search** via LightRAG Server REST API (`/query/data`, raw retrieval).
 - **Auto‑ingestion** of conversation content (hooks‑based, fires on every AI turn).
 - **Auto‑recall** of relevant memories before each AI turn.
-- **Configurable query mode** (`mix`, `local`, `global`, `hybrid`, `naive`, `bypass`).
+- **Query mode locked to `naive`** for stable `/query/data` behavior.
 - **Configurable capture modes** (`all` or `everything`).
 - **Structured debug logging** — response time, byte sizes, item counts (only when `debug: true`).
 
@@ -60,7 +60,7 @@ Add to your `openclaw.json`:
           autoIngest: true,
           autoRecall: true,
           maxRecallResults: 8,
-          queryMode: "mix",                    // mix = knowledge graph + vector search
+          queryMode: "naive",                  // fixed: /query/data + naive only
           captureMode: "all",
           minCaptureLength: 10,
           debug: false
@@ -82,21 +82,14 @@ Restart the Gateway after configuration changes.
 | `autoIngest` | boolean | `true` | Capture conversation turns and insert into LightRAG after each AI response |
 | `autoRecall` | boolean | `true` | Inject relevant memories into the AI context before each turn |
 | `maxRecallResults` | number | `8` | Max memory snippets injected per turn (1–20) |
-| `queryMode` | string | `"mix"` | LightRAG query strategy — see table below |
+| `queryMode` | string | `"naive"` | Fixed to `naive` (other values are ignored at runtime) |
 | `captureMode` | string | `"all"` | `all`: strip injected context blocks before ingesting; `everything`: ingest as-is |
 | `minCaptureLength` | number | `10` | Skip captured text shorter than this character count |
 | `debug` | boolean | `false` | Enable verbose diagnostics (response time, byte sizes, counts) |
 
-#### Query Modes
+#### Query Mode
 
-| Mode | Description | Best for |
-|------|-------------|----------|
-| `mix` | Knowledge graph + vector search (recommended) | General purpose |
-| `local` | Entity-focused, direct relationships | Specific facts |
-| `global` | Broad patterns across the knowledge graph | Trend / summary queries |
-| `hybrid` | Combines local + global | Balanced retrieval |
-| `naive` | Vector similarity only, no knowledge graph | Simple keyword recall |
-| `bypass` | Direct LLM, no retrieval | Pass-through |
+`queryMode` is intentionally pinned to `naive` so all recall uses `POST /query/data` only (raw retrieval, no LLM answer generation path).
 
 ### Dependencies
 
@@ -163,10 +156,10 @@ For more scenarios (content creation, compliance audit, multi‑channel context 
 | Operation | Latency (localhost) | Throughput |
 |-----------|---------------------|------------|
 | Ingestion per message | 20‑100 ms | 10‑50 msg/sec (SQLite) |
-| Recall query (top‑8, mode=mix) | 100‑600 ms | 3‑10 queries/sec |
+| Recall query (top‑8, mode=naive) | 100‑600 ms | 3‑10 queries/sec |
 | Embedding computation | 10‑50 ms per query | Depends on model & CPU |
 
-> **Note:** `mix` mode is slower than `naive` but produces significantly higher recall quality through knowledge graph traversal.
+> **Note:** This plugin now uses only `naive` mode to keep `/query/data` responses stable.
 
 ### Advanced Configuration & Workarounds
 
@@ -207,10 +200,10 @@ npm test
 - Use the LightRAG Web UI (`http://127.0.0.1:9621`) to browse ingested documents and query the knowledge graph.
 - Query the LightRAG API directly:
   ```bash
-  curl -X POST http://127.0.0.1:9621/query \
+  curl -X POST http://127.0.0.1:9621/query/data \
     -H "Content-Type: application/json" \
     -H "X-API-Key: your-api-key-here" \
-    -d '{"query": "test", "mode": "mix"}'
+    -d '{"query": "test query", "mode": "naive"}'
   ```
 - Check server health:
   ```bash

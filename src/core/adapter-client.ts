@@ -161,11 +161,8 @@ type LightRagQueryMode = "local" | "global" | "hybrid" | "naive" | "mix" | "bypa
 interface LightRagQueryDataRequest {
   query: string;
   mode?: LightRagQueryMode;
-  top_k?: number;
-  chunk_top_k?: number;
   include_references?: boolean;
-  hl_keywords?: string[];
-  ll_keywords?: string[];
+  top_k?: number;
   enable_rerank?: boolean;
 }
 
@@ -236,10 +233,10 @@ export class AdapterClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
-    /** LightRAG query mode from plugin config */
-    private readonly queryMode: LightRagQueryMode = "naive",
+    /** Kept for compatibility; runtime request mode is forced to 'naive'. */
+    private readonly configuredQueryMode: LightRagQueryMode = "naive",
     private readonly logger: PluginLogger,
-  ) {}
+  ) { }
 
   /**
    * Recall: query LightRAG for relevant context.
@@ -250,20 +247,22 @@ export class AdapterClient {
     topK: number,
     opts?: { conversationId?: string; date?: string },
   ) {
+    const requestMode: LightRagQueryMode = "naive";
+    const safeQuery = String(query || "").trim();
     const safeTopK = Number.isFinite(topK) ? Math.max(1, Math.min(20, Math.floor(topK))) : 8;
     const body: LightRagQueryDataRequest = {
-      query,
-      mode: this.queryMode,
-      top_k: safeTopK,
-      chunk_top_k: safeTopK,
+      query: safeQuery,
+      mode: requestMode,
       include_references: true,
       enable_rerank: false,
+      top_k: safeTopK,
     };
 
     this.logger.event("query_start", {
-      mode: this.queryMode,
+      configuredMode: this.configuredQueryMode,
+      mode: requestMode,
       topK: safeTopK,
-      queryLen: query.length,
+      queryLen: safeQuery.length,
       conversationId: opts?.conversationId || "-",
     });
 
@@ -273,7 +272,7 @@ export class AdapterClient {
       "/query/data",
       body,
       this.logger,
-      `mode=${this.queryMode}`,
+      `mode=${requestMode}`,
     );
 
     // Build context items from /query/data response: entities, relationships, chunks

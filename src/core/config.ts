@@ -1,5 +1,5 @@
 export type CaptureMode = "all" | "everything";
-export type QueryMode = "local" | "global" | "hybrid" | "naive" | "mix" | "bypass";
+export type QueryMode = "naive";
 
 export type LightragConfig = {
   baseUrl: string;
@@ -24,8 +24,6 @@ const ALLOWED_KEYS = [
   "minCaptureLength",
   "debug",
 ];
-
-const VALID_QUERY_MODES: QueryMode[] = ["local", "global", "hybrid", "naive", "mix", "bypass"];
 
 function assertAllowedKeys(value: Record<string, unknown>): void {
   const unknown = Object.keys(value).filter((k) => !ALLOWED_KEYS.includes(k));
@@ -56,12 +54,11 @@ export function parseConfig(raw: unknown): LightragConfig {
   const maxRecallResults = Number(cfg.maxRecallResults ?? 8);
   const minCaptureLength = Number(cfg.minCaptureLength ?? 10);
 
-  const rawQueryMode = typeof cfg.queryMode === "string" ? cfg.queryMode as QueryMode : "naive";
-
   return {
     baseUrl,
     apiKey,
-    queryMode: VALID_QUERY_MODES.includes(rawQueryMode) ? rawQueryMode : "naive",
+    // Runtime query mode is fixed to "naive" for stability with /query/data.
+    queryMode: "naive",
     autoIngest: cfg.autoIngest === false ? false : true,
     autoRecall: cfg.autoRecall === false ? false : true,
     maxRecallResults: Number.isFinite(maxRecallResults)
@@ -87,8 +84,8 @@ export const lightragConfigSchema = {
     },
     queryMode: {
       type: "string",
-      enum: ["local", "global", "hybrid", "naive", "mix", "bypass"],
-      description: "LightRAG query mode. 'mix' combines knowledge graph + vector search; 'naive' uses vector similarity only",
+      enum: ["naive"],
+      description: "LightRAG query mode. Fixed to 'naive' for /query/data stability",
       default: "naive"
     },
     autoIngest: {
