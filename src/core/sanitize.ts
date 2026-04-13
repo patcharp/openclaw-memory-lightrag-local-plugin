@@ -112,6 +112,8 @@ export function stripUntrustedMetadataBlocks(raw: string): string {
 
 export function sanitizeCapturedText(raw: string, mode: "all" | "everything"): string {
   let text = stripUntrustedMetadataBlocks(raw);
+  // OpenClaw compaction preamble line; not user intent and should not be stored as memory.
+  text = text.replace(/^System:\s*\[[^\]]+\]\s*Compacted\b[^\n]*\n?/gim, "");
   if (mode === "all") {
     text = text.replace(/<lightrag-context>[\s\S]*?<\/lightrag-context>\s*/gi, "");
     text = text.replace(/<supermemory-context>[\s\S]*?<\/supermemory-context>\s*/gi, "");

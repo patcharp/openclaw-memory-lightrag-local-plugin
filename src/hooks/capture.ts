@@ -29,6 +29,7 @@ type MessageLike = {
   role?: string;
   content?: unknown;
   text?: string;
+  summary?: string;
   output_text?: string;
   output?: unknown;
   sender?: string;
@@ -41,6 +42,7 @@ type MessageLike = {
   date?: unknown;
   messageId?: string;
   message_id?: string;
+  responseId?: string;
   id?: string;
   metadata?: unknown;
 };
@@ -126,7 +128,6 @@ function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"
       metadata.sender,
       metadata.display_name,
       untrusted.sender,
-      role === "assistant" ? "assistant" : undefined,
     );
     const ts = toIsoTimestamp(
       m.ts ??
@@ -138,7 +139,15 @@ function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"
       metadata.timestamp ??
       untrusted.timestamp,
     );
-    const messageId = firstString(m.messageId, m.message_id, m.id, metadata.messageId, metadata.message_id, untrusted.messageId);
+    const messageId = firstString(
+      m.messageId,
+      m.message_id,
+      m.responseId,
+      m.id,
+      metadata.messageId,
+      metadata.message_id,
+      untrusted.messageId,
+    );
     const senderId = firstString(metadata.sender_id, metadata.senderId, untrusted.senderId);
 
     out.push({ role: role as "user" | "assistant", text, sender, ts, messageId, senderId });
@@ -161,7 +170,6 @@ export function buildCaptureHandler(params: {
       success: event.success,
       messages: Array.isArray(event.messages) ? event.messages.length : "none",
       ctx: ctx || {},
-      event: event || {},
     });
 
     if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
@@ -249,7 +257,7 @@ export function buildCaptureHandler(params: {
           role: t.role,
           content: t.text,
           ts: t.ts,
-          sender: t.sender || ctx?.agentId,
+          sender: t.sender || (t.role === "assistant" ? firstString(ctx?.agentId, "assistant") : undefined),
           messageId: t.messageId,
         })),
       });
