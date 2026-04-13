@@ -12,7 +12,7 @@ import {
   toDateString,
 } from "../core/sanitize";
 
-interface EventContext {
+type EventContext = Partial<{
   runId: string;
   agentId: string;
   sessionKey: string;
@@ -21,7 +21,9 @@ interface EventContext {
   messageProvider: string;
   trigger: string;
   channelId: string;
-}
+  accountId: string;
+  conversationId: string;
+}>;
 
 type MessageLike = {
   role?: string;
@@ -70,6 +72,24 @@ function toIsoTimestamp(value: unknown): string | undefined {
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   }
+  return undefined;
+}
+
+function conversationIdFromSessionKey(sessionKey?: string): string | undefined {
+  if (!sessionKey) return undefined;
+  const raw = String(sessionKey).trim();
+  if (!raw) return undefined;
+
+  const parts = raw.split(":").filter(Boolean);
+  const directIdx = parts.lastIndexOf("direct");
+  if (directIdx >= 0 && directIdx < parts.length - 1) {
+    return parts[directIdx + 1];
+  }
+
+  const tail = parts[parts.length - 1];
+  if (!tail) return undefined;
+  if (/^(agent|main|direct)$/i.test(tail)) return undefined;
+  if (/^[a-z0-9_-]{3,}$/i.test(tail)) return tail;
   return undefined;
 }
 
@@ -141,6 +161,7 @@ export function buildCaptureHandler(params: {
       success: event.success,
       messages: Array.isArray(event.messages) ? event.messages.length : "none",
       ctx: ctx || {},
+      event: event || {},
     });
 
     if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
@@ -156,19 +177,26 @@ export function buildCaptureHandler(params: {
     const senderIdFallback = [...extracted].reverse().find((x) => x.role === "user" && x.senderId)?.senderId;
 
     const provider = channelBase(String(ctx?.messageProvider || ctx?.channelId || "unknown"));
+    const sessionKeyConversation = conversationIdFromSessionKey(ctx?.sessionKey);
     const knownConversation =
       firstString(
         event.conversationId,
         event.channelConversationId,
-        ctx?.sessionId,
+        ctx?.conversationId,
+        sessionKeyConversation,
         lastConversationByChannel.get(provider),
         senderIdFallback,
-        ctx?.runId,
+        ctx?.accountId,
       ) || `${provider}:unknown`;
     const conversationId = normalizeConversationId(provider, knownConversation);
     lastConversationByChannel.set(provider, conversationId);
 
-    logger.event("capture_conversation_resolved", { conversationId, provider, senderIdFallback: senderIdFallback || "-" });
+    logger.event("capture_conversation_resolved", {
+      conversationId,
+      provider,
+      senderIdFallback: senderIdFallback || "-",
+      sessionKeyConversation: sessionKeyConversation || "-",
+    });
 
     const texts = extracted
       .map((t) => ({ ...t, text: clipText(t.text) }))
@@ -212,6 +240,8 @@ export function buildCaptureHandler(params: {
       const firstTs = texts.find((t) => t.ts)?.ts;
       const ingestDate = firstTs ? toDateString(new Date(firstTs).getTime()) : toDateString();
       const ingestResult = await client.ingest({
+        runId: ctx?.runId,
+        agentId: ctx?.agentId,
         conversationId,
         channel: provider,
         date: ingestDate,
@@ -219,7 +249,7 @@ export function buildCaptureHandler(params: {
           role: t.role,
           content: t.text,
           ts: t.ts,
-          sender: t.sender,
+          sender: t.sender || ctx?.agentId,
           messageId: t.messageId,
         })),
       });

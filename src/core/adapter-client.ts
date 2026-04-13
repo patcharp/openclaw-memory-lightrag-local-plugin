@@ -344,6 +344,8 @@ export class AdapterClient {
    * Maps to POST /documents/texts (batch) or POST /documents/text (single).
    */
   async ingest(payload: {
+    runId?: string;
+    agentId?: string;
     conversationId: string;
     channel: string;
     date: string;
@@ -355,29 +357,16 @@ export class AdapterClient {
       messageId?: string;
     }>;
   }): Promise<AdapterIngestResult> {
-    const baseSource = `conv:${sourceToken(payload.conversationId)}/ch:${sourceToken(payload.channel)}`;
+    const fileSource = `conv:${sourceToken(payload.conversationId)}/ch:${sourceToken(payload.channel)}/run:${sourceToken(payload.runId || "")}`;
     const docs = payload.items
       .filter((item) => item.content && item.content.trim().length > 0)
-      .map((item, idx) => {
+      .map((item) => {
         const parts: string[] = [];
         if (item.role) parts.push(`[${item.role.toUpperCase()}]`);
         if (item.sender) parts.push(`(${item.sender})`);
         if (item.ts) parts.push(`@${item.ts}`);
         parts.push(item.content.trim());
         const text = parts.join(" ");
-
-        const itemSeed = [
-          item.messageId || "",
-          item.role || "",
-          item.sender || "",
-          item.ts || "",
-          item.content.trim().slice(0, 512),
-          String(idx + 1),
-        ].join("|");
-        const hashed = shortHash(itemSeed);
-        const messagePart = item.messageId ? `m_${sourceToken(item.messageId, 48)}` : "h";
-        const perItemKey = `item:${messagePart}_${hashed}`;
-        const fileSource = `${baseSource}/${perItemKey}`;
 
         return { text, fileSource };
       });
