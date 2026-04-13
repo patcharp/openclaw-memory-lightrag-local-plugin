@@ -45,38 +45,51 @@ export function buildRecallHandler(params: {
       return;
     }
 
+    const recallStart = performance.now();
+    const queryPreview = prompt.length > 60 ? `${prompt.slice(0, 60)}…` : prompt;
+
     try {
       const conversationId = resolveConversationId?.(event);
 
       logger.warn(
-        `memory-lightrag-local: recall start conv=${conversationId || "*"} promptLen=${prompt.length} topK=${cfg.maxRecallResults} mode=${cfg.queryMode}`,
+        `memory-lightrag-local: recall start conv=${conversationId || "*"} topK=${cfg.maxRecallResults} mode=${cfg.queryMode} query="${queryPreview}"`,
       );
 
       const result = await client.query(prompt, cfg.maxRecallResults, {
         ...(conversationId ? { conversationId } : {}),
       });
+
+      const elapsedMs = Math.round(performance.now() - recallStart);
       const context = formatRecallContext(result.contextItems, cfg.maxRecallResults);
 
       if (!context) {
         logger.warn(
-          `memory-lightrag-local: recall empty — no usable context returned conv=${conversationId || "*"} contextItems=${result.contextItems.length}`,
+          `memory-lightrag-local: recall empty conv=${conversationId || "*"} contextItems=${result.contextItems.length} elapsed=${elapsedMs}ms`,
         );
         return;
       }
 
+      // Snippet: first line of the actual recalled text (skip the XML wrapper lines)
+      const firstMemoryLine = context
+        .split("\n")
+        .find((l) => l.startsWith("- "))
+        ?.slice(2, 122) ?? "";
+      const snippet = firstMemoryLine.length > 0 ? `"${firstMemoryLine}${firstMemoryLine.length >= 120 ? "…" : ""}"` : "(none)";
+
       logger.warn(
-        `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length}`,
+        `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length} elapsed=${elapsedMs}ms firstSnippet=${snippet}`,
       );
 
       if (cfg.debug) {
         logger.debug(
-          `memory-lightrag-local: recall context preview: ${context.slice(0, 200).replace(/\n/g, "↵")}`,
+          `memory-lightrag-local: recall context preview: ${context.slice(0, 300).replace(/\n/g, "↵")}`,
         );
       }
 
       return { prependContext: context };
     } catch (err) {
-      logger.warn(`memory-lightrag-local: recall failed: ${String(err)}`);
+      const elapsedMs = Math.round(performance.now() - recallStart);
+      logger.warn(`memory-lightrag-local: recall failed elapsed=${elapsedMs}ms error=${String(err)}`);
       return;
     }
   };
