@@ -125,6 +125,7 @@ interface LightRagQueryRequest {
   top_k?: number;
   include_references?: boolean;
   conversation_history?: Array<{ role: string; content: string }>;
+  only_need_context?: boolean;
 }
 
 interface LightRagQueryResponse {
@@ -158,6 +159,7 @@ export class AdapterClient {
       mode: this.queryMode,
       top_k: topK,
       include_references: true,
+      only_need_context: true, // Skip LLM generation phase, just return graph contexts
     };
 
     this.logger?.debug(
@@ -176,8 +178,18 @@ export class AdapterClient {
     // Build context items from the response text + optional references
     const contextItems: AdapterContextItem[] = [];
 
-    if (result.response) {
+    if (result.response && typeof result.response === "string") {
       contextItems.push({ text: result.response });
+    }
+
+    if (Array.isArray(result.references)) {
+      for (const ref of result.references) {
+        if (Array.isArray(ref.content)) {
+          for (const text of ref.content) {
+            contextItems.push({ text, docId: ref.file_path || ref.reference_id });
+          }
+        }
+      }
     }
 
     const refCount = result.references?.length ?? 0;
