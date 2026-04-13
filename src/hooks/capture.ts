@@ -98,6 +98,7 @@ export function buildCaptureHandler(params: {
     lastAssistantSigByConversation.set(conversationId, sig);
 
     try {
+      const captureStart = performance.now();
       await client.ingest({
         conversationId,
         channel: provider,
@@ -110,10 +111,11 @@ export function buildCaptureHandler(params: {
         })),
       });
 
+      const elapsedMs = Math.round(performance.now() - captureStart);
       const totalChars = texts.reduce((n, t) => n + t.text.length, 0);
       const roles = texts.map((t) => t.role).join(",");
       api.logger.warn(
-        `memory-lightrag-local: capture ok conv=${conversationId} provider=${provider} items=${texts.length} roles=${roles} totalChars=${totalChars}`,
+        `memory-lightrag-local: capture ok conv=${conversationId} provider=${provider} items=${texts.length} roles=${roles} totalChars=${totalChars} elapsed=${elapsedMs}ms`,
       );
     } catch (err) {
       api.logger.warn(`memory-lightrag-local: capture failed: ${String(err)}`);
