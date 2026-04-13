@@ -82,7 +82,7 @@ const memoryPlugin = {
       return;
     }
 
-    const client = new AdapterClient(cfg.baseUrl, cfg.apiKey);
+    const client = new AdapterClient(cfg.baseUrl, cfg.apiKey, cfg.queryMode, cfg.debug ? api.logger : undefined);
     const lastConversationByChannel = new Map<string, string>();
 
     api.logger.warn(

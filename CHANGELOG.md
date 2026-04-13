@@ -7,16 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Initial plugin structure copied from `openclaw-lightrag-local` repository.
-- Comprehensive README with use cases, known issues, error handling, and roadmap.
-- Basic configuration schema and UI hints.
-
-### Changed
-- None yet.
+## [0.3.0] - 2026-04-13
 
 ### Fixed
-- None yet.
+
+- **Critical: 404 on all API calls** — `AdapterClient` was targeting a custom
+  adapter middleware layer (`/adapter/*` endpoints) that does not exist on the
+  stock LightRAG Server. All calls now go directly to the LightRAG Server REST
+  API:
+  - `recall` → `POST /query`
+  - `capture / ingest` → `POST /documents/texts` (batch) or
+    `POST /documents/text` (single)
+- **Wrong auth header** — changed `x-api-key` → `X-API-Key` to match the
+  LightRAG Server `APIKeyHeader` security scheme.
+
+### Added
+
+- **`queryMode` config option** — allows choosing the LightRAG query strategy
+  (`local`, `global`, `hybrid`, `naive`, `mix`, `bypass`). Default is `mix`
+  which combines knowledge-graph traversal with vector search for best
+  recall quality.
+- `AdapterClient.health()` helper method mapping to `GET /health`.
+- `queryMode` UI hint and JSON Schema entry in `openclaw.plugin.json`.
+
+### Changed
+
+- `AdapterClient` completely rewritten to speak directly to the LightRAG
+  Server API instead of a separate adapter middleware.
+- `ingest()` now formats each conversation item with role/sender/timestamp
+  prefix before inserting as text documents in LightRAG.
+- `listInbox()`, `inboxAction()`, and `retrievalFeedback()` return graceful
+  stubs (LightRAG has no equivalent endpoints) — tools no longer throw.
 
 ## [0.2.0] - 2026-02-21
 

@@ -1,8 +1,10 @@
 export type CaptureMode = "all" | "everything";
+export type QueryMode = "local" | "global" | "hybrid" | "naive" | "mix" | "bypass";
 
 export type LightragConfig = {
   baseUrl: string;
   apiKey: string;
+  queryMode: QueryMode;
   autoIngest: boolean;
   autoRecall: boolean;
   maxRecallResults: number;
@@ -14,6 +16,7 @@ export type LightragConfig = {
 const ALLOWED_KEYS = [
   "baseUrl",
   "apiKey",
+  "queryMode",
   "autoIngest",
   "autoRecall",
   "maxRecallResults",
@@ -21,6 +24,8 @@ const ALLOWED_KEYS = [
   "minCaptureLength",
   "debug",
 ];
+
+const VALID_QUERY_MODES: QueryMode[] = ["local", "global", "hybrid", "naive", "mix", "bypass"];
 
 function assertAllowedKeys(value: Record<string, unknown>): void {
   const unknown = Object.keys(value).filter((k) => !ALLOWED_KEYS.includes(k));
@@ -51,9 +56,12 @@ export function parseConfig(raw: unknown): LightragConfig {
   const maxRecallResults = Number(cfg.maxRecallResults ?? 8);
   const minCaptureLength = Number(cfg.minCaptureLength ?? 10);
 
+  const rawQueryMode = typeof cfg.queryMode === "string" ? cfg.queryMode as QueryMode : "mix";
+
   return {
     baseUrl,
     apiKey,
+    queryMode: VALID_QUERY_MODES.includes(rawQueryMode) ? rawQueryMode : "mix",
     autoIngest: cfg.autoIngest === false ? false : true,
     autoRecall: cfg.autoRecall === false ? false : true,
     maxRecallResults: Number.isFinite(maxRecallResults)
@@ -76,6 +84,12 @@ export const lightragConfigSchema = {
     apiKey: {
       type: "string",
       description: "API key for authenticating with the LightRAG adapter"
+    },
+    queryMode: {
+      type: "string",
+      enum: ["local", "global", "hybrid", "naive", "mix", "bypass"],
+      description: "LightRAG query mode. 'mix' (default) combines knowledge graph + vector search for best results",
+      default: "mix"
     },
     autoIngest: {
       type: "boolean",

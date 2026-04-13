@@ -2,7 +2,7 @@
   "id": "memory-lightrag-local",
   "name": "Memory (LightRAG Local)",
   "description": "OpenClaw plugin for LightRAG local memory backend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "memory",
   "uiHints": {
     "baseUrl": {
@@ -37,6 +37,11 @@
       "label": "Min Capture Length",
       "placeholder": "10",
       "help": "Skip captured text shorter than this",
+      "advanced": true
+    },
+    "queryMode": {
+      "label": "Query Mode",
+      "help": "LightRAG query strategy. mix (default) combines knowledge graph + vector search",
       "advanced": true
     },
     "debug": {
@@ -86,6 +91,12 @@
         "maximum": 200,
         "description": "Skip captured text shorter than this length",
         "default": 10
+      },
+      "queryMode": {
+        "type": "string",
+        "enum": ["local", "global", "hybrid", "naive", "mix", "bypass"],
+        "description": "LightRAG query mode. mix combines knowledge graph + vector search (recommended)",
+        "default": "mix"
       },
       "debug": {
         "type": "boolean",
