@@ -38,20 +38,42 @@ export function buildRecallHandler(params: {
 
   return async (event: Record<string, unknown>) => {
     const prompt = typeof event.prompt === "string" ? event.prompt.trim() : "";
-    if (!prompt || prompt.length < 3) return;
+    if (!prompt || prompt.length < 3) {
+      if (cfg.debug) {
+        logger.debug(`memory-lightrag-local: recall skip — prompt too short (${prompt.length} chars)`);
+      }
+      return;
+    }
 
     try {
       const conversationId = resolveConversationId?.(event);
+
+      logger.warn(
+        `memory-lightrag-local: recall start conv=${conversationId || "*"} promptLen=${prompt.length} topK=${cfg.maxRecallResults} mode=${cfg.queryMode}`,
+      );
+
       const result = await client.query(prompt, cfg.maxRecallResults, {
         ...(conversationId ? { conversationId } : {}),
       });
       const context = formatRecallContext(result.contextItems, cfg.maxRecallResults);
-      if (!context) return;
+
+      if (!context) {
+        logger.warn(
+          `memory-lightrag-local: recall empty — no usable context returned conv=${conversationId || "*"} contextItems=${result.contextItems.length}`,
+        );
+        return;
+      }
+
+      logger.warn(
+        `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length}`,
+      );
+
       if (cfg.debug) {
         logger.debug(
-          `memory-lightrag-local: recall inject chars=${context.length} conv=${conversationId || "*"}`,
+          `memory-lightrag-local: recall context preview: ${context.slice(0, 200).replace(/\n/g, "↵")}`,
         );
       }
+
       return { prependContext: context };
     } catch (err) {
       logger.warn(`memory-lightrag-local: recall failed: ${String(err)}`);
