@@ -127,6 +127,7 @@ interface LightRagQueryDataRequest {
   include_references?: boolean;
   hl_keywords?: string[];
   ll_keywords?: string[];
+  enable_rerank?: boolean;
 }
 
 interface LightRagQueryDataEntity {
@@ -216,6 +217,7 @@ export class AdapterClient {
       mode: this.queryMode,
       top_k: topK,
       include_references: true,
+      enable_rerank: false, // Disable rerank to avoid warning (no rerank model configured)
     };
 
     this.logger?.debug(
