@@ -9,10 +9,7 @@ import {
   extractText,
   extractUntrustedMetadata,
   normalizeConversationId,
-  normalizeTimestamp,
   resolveConversationId,
-  sanitizeCapturedText,
-  toDateString,
 } from "./core/sanitize";
 
 const MemorySearchSchema = {
@@ -71,17 +68,6 @@ const MemoryRetrievalFeedbackSchema = {
 function firstString(...values: Array<unknown>): string | undefined {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function toIsoTimestamp(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(normalizeTimestamp(value)).toISOString();
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   }
   return undefined;
 }
@@ -344,52 +330,15 @@ const memoryPlugin = {
         const canonical = normalizeConversationId(channel, conversationId);
         lastConversationByChannel.set(channel, canonical);
 
-        const text = sanitizeCapturedText(rawText, cfg.captureMode);
-        if (!text || text.length < cfg.minCaptureLength) {
-          inboundLogger.event("ingest_skip_short_text", {
-            conversationId: canonical,
-            textLen: text?.length || 0,
-            minCaptureLength: cfg.minCaptureLength,
-          });
-          return;
-        }
-
         const metadata = (event.metadata && typeof event.metadata === "object")
           ? (event.metadata as Record<string, unknown>)
           : {};
-        const ts = toIsoTimestamp(event.timestamp) || toIsoTimestamp(untrusted.timestamp);
         const messageId = firstString(metadata.messageId, metadata.message_id, untrusted.messageId);
-        const sender = firstString(untrusted.sender, event.from);
-
-        const ingestResult = await client.ingest({
+        inboundLogger.event("message_received_context_updated", {
           conversationId: canonical,
-          channel,
-          date: ts ? toDateString(new Date(ts).getTime()) : toDateString(),
-          items: [
-            {
-              role: "user",
-              content: text,
-              ts,
-              sender,
-              messageId,
-            },
-          ],
+          senderId: untrusted.senderId || "-",
+          messageId: messageId || "-",
         });
-
-        const ingestStatus = String(ingestResult.status || "unknown").toLowerCase();
-        if (ingestStatus === "duplicated") {
-          inboundLogger.event("ingest_duplicate", {
-            conversationId: canonical,
-            message: ingestResult.message || "-",
-          });
-          return;
-        }
-
-        inboundLogger.event(
-          "ingest_ok",
-          { conversationId: canonical, status: ingestStatus },
-          "info",
-        );
       } catch (err) {
         inboundLogger.event("message_received_failed", { error: String(err) }, "warn");
       }
