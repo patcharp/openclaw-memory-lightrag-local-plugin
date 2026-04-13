@@ -147,7 +147,7 @@ export class AdapterClient {
 
   /**
    * Recall: query LightRAG for relevant context.
-   * Maps to POST /query
+   * Maps to POST /query/data
    */
   async query(
     query: string,
@@ -169,7 +169,7 @@ export class AdapterClient {
     const result: LightRagQueryResponse = await postJson(
       this.baseUrl,
       this.apiKey,
-      "/query",
+      "/query/data",
       body,
       this.logger,
       `mode=${this.queryMode}`,
@@ -178,22 +178,35 @@ export class AdapterClient {
     // Build context items from the response text + optional references
     const contextItems: AdapterContextItem[] = [];
 
-    if (result.response && typeof result.response === "string") {
-      contextItems.push({ text: result.response });
-    }
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+      if (result.response && typeof result.response === "string") {
+        contextItems.push({ text: result.response });
+      }
 
-    if (Array.isArray(result.references)) {
-      for (const ref of result.references) {
-        if (Array.isArray(ref.content)) {
-          for (const text of ref.content) {
-            contextItems.push({ text, docId: ref.file_path || ref.reference_id });
+      if (Array.isArray(result.references)) {
+        for (const ref of result.references) {
+          if (Array.isArray(ref.content)) {
+            for (const text of ref.content) {
+              contextItems.push({ text, docId: ref.file_path || ref.reference_id });
+            }
           }
         }
       }
+    } else if (Array.isArray(result)) {
+      // Fallback if LightRAG /query/data returns a direct array of chunks
+      for (const item of result) {
+        if (typeof item === "string") {
+           contextItems.push({ text: item });
+        } else if (item && typeof item === "object" && item.content) {
+           contextItems.push({ text: String(item.content) });
+        }
+      }
+    } else if (typeof result === "string") {
+      contextItems.push({ text: result });
     }
 
-    const refCount = result.references?.length ?? 0;
-    const responseChars = result.response?.length ?? 0;
+    const refCount = Array.isArray((result as any)?.references) ? (result as any).references.length : 0;
+    const responseChars = typeof (result as any)?.response === "string" ? (result as any).response.length : 0;
 
     this.logger?.debug(
       `[lightrag] query result responseChars=${responseChars} references=${refCount} contextItems=${contextItems.length}`,
