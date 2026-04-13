@@ -212,12 +212,14 @@ export class AdapterClient {
     topK: number,
     opts?: { conversationId?: string; date?: string },
   ) {
+    // Use naive mode with chunk_top_k for fast retrieval (tested in Postman)
     const body: LightRagQueryDataRequest = {
       query,
-      mode: this.queryMode,
-      top_k: topK,
+      mode: "naive", // Vector similarity only, no knowledge graph (faster)
+      top_k: 10,
+      chunk_top_k: 8, // Limit chunks to improve performance
       include_references: true,
-      enable_rerank: false, // Disable rerank to avoid warning (no rerank model configured)
+      enable_rerank: false, // Disable rerank to avoid warning
     };
 
     this.logger?.debug(
