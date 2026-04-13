@@ -59,7 +59,9 @@ export function buildCaptureHandler(params: {
 
   return async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
     if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
-      if (cfg.debug) api.logger.debug("memory-lightrag-local: capture skip (invalid/empty event)");
+      api.logger.warn(
+        `memory-lightrag-local: capture skip (invalid/empty event) success=${event.success} messages=${Array.isArray(event.messages) ? event.messages.length : "none"}`,
+      );
       return;
     }
 
@@ -74,19 +76,23 @@ export function buildCaptureHandler(params: {
       .filter((t) => t.text.length >= cfg.minCaptureLength);
 
     if (texts.length === 0) {
-      if (cfg.debug) api.logger.debug("memory-lightrag-local: capture skip (no eligible text)");
+      api.logger.warn(
+        `memory-lightrag-local: capture skip (no eligible text) conv=${conversationId} provider=${provider} mode=${cfg.captureMode} minLen=${cfg.minCaptureLength}`,
+      );
       return;
     }
 
     const assistant = [...texts].reverse().find((x) => x.role === "assistant");
     if (!assistant) {
-      if (cfg.debug) api.logger.debug("memory-lightrag-local: capture skip (no assistant output in last turn)");
+      api.logger.warn(
+        `memory-lightrag-local: capture skip (no assistant output in last turn) conv=${conversationId} found=${texts.map((t) => t.role).join(",")}`,
+      );
       return;
     }
 
     const sig = `${conversationId}|assistant|${assistant.text}`;
     if (lastAssistantSigByConversation.get(conversationId) === sig) {
-      if (cfg.debug) api.logger.debug("memory-lightrag-local: capture dedupe skip");
+      if (cfg.debug) api.logger.debug(`memory-lightrag-local: capture dedupe skip conv=${conversationId}`);
       return;
     }
     lastAssistantSigByConversation.set(conversationId, sig);
@@ -104,8 +110,10 @@ export function buildCaptureHandler(params: {
         })),
       });
 
+      const totalChars = texts.reduce((n, t) => n + t.text.length, 0);
+      const roles = texts.map((t) => t.role).join(",");
       api.logger.warn(
-        `memory-lightrag-local: capture ok conv=${conversationId} provider=${provider} items=${texts.length}`,
+        `memory-lightrag-local: capture ok conv=${conversationId} provider=${provider} items=${texts.length} roles=${roles} totalChars=${totalChars}`,
       );
     } catch (err) {
       api.logger.warn(`memory-lightrag-local: capture failed: ${String(err)}`);
