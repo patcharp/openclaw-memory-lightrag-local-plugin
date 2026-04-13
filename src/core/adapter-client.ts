@@ -1,8 +1,10 @@
+import type { PluginLogger } from "./logger";
+
 /**
  * AdapterClient — speaks directly to the LightRAG Server REST API.
  *
  * LightRAG Server endpoints used:
- *   POST /query           → query / recall
+ *   POST /query/data      → query / recall
  *   POST /documents/texts → batch ingest (capture)
  *   POST /documents/text  → single text ingest
  *   GET  /health          → health check
@@ -13,12 +15,11 @@
  */
 
 export type AdapterContextItem = { text: string; docId?: string };
-
-export interface AdapterLogger {
-  debug(msg: string): void;
-  info?: (msg: string) => void;
-  warn(msg: string): void;
-}
+export type AdapterIngestResult = {
+  status: string;
+  message?: string;
+  track_id?: string;
+};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -42,17 +43,38 @@ function preview(text: string, maxLen = 80): string {
   return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
 }
 
+/** Sanitize dynamic ids for use in LightRAG file_source segments. */
+function sourceToken(value: string, maxLen = 120): string {
+  return value
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9:_./-]/g, "_")
+    .slice(0, maxLen);
+}
+
+function toIngestResult(data: unknown): AdapterIngestResult {
+  if (!data || typeof data !== "object") {
+    return { status: "unknown", message: "unexpected non-object response from LightRAG ingest API" };
+  }
+
+  const rec = data as Record<string, unknown>;
+  const status = typeof rec.status === "string" ? rec.status : "unknown";
+  const message = typeof rec.message === "string" ? rec.message : undefined;
+  const trackId = typeof rec.track_id === "string" ? rec.track_id : undefined;
+  return { status, message, track_id: trackId };
+}
+
 async function getJson(
   baseUrl: string,
   apiKey: string,
   path: string,
-  logger?: AdapterLogger,
+  logger: PluginLogger,
   label?: string,
 ) {
   const start = performance.now();
   const url = `${baseUrl}${path}`;
 
-  logger?.debug(`[lightrag] → GET ${path}`);
+  logger.event("http_request_start", { method: "GET", path, label });
 
   const res = await fetch(url, {
     method: "GET",
@@ -64,14 +86,23 @@ async function getJson(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    logger?.warn(`[lightrag] ✗ GET ${path} status=${res.status} elapsed=${ms}ms body=${preview(text)}`);
+    logger.event(
+      "http_request_failed",
+      { method: "GET", path, label, status: res.status, elapsedMs: ms, bodyPreview: preview(text) },
+      "warn",
+    );
     throw new Error(`request failed: ${res.status} ${text}`);
   }
 
   const data = await res.json();
-  logger?.info?.(
-    `[lightrag] ✓ GET ${path}${label ? ` (${label})` : ""} status=${res.status} elapsed=${ms}ms responseBytes=${jsonBytes(data)}`,
-  );
+  logger.event("http_request_ok", {
+    method: "GET",
+    path,
+    label,
+    status: res.status,
+    elapsedMs: ms,
+    responseBytes: jsonBytes(data),
+  });
   return data;
 }
 
@@ -80,14 +111,14 @@ async function postJson(
   apiKey: string,
   path: string,
   body: unknown,
-  logger?: AdapterLogger,
+  logger: PluginLogger,
   label?: string,
 ) {
   const start = performance.now();
   const url = `${baseUrl}${path}`;
   const reqBytes = jsonBytes(body);
 
-  logger?.info?.(`[lightrag] → POST ${path}${label ? ` (${label})` : ""} requestBytes=${reqBytes}`);
+  logger.event("http_request_start", { method: "POST", path, label, requestBytes: reqBytes });
 
   const res = await fetch(url, {
     method: "POST",
@@ -103,16 +134,23 @@ async function postJson(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    logger?.warn(
-      `[lightrag] ✗ POST ${path} status=${res.status} elapsed=${ms}ms body=${preview(text)}`,
+    logger.event(
+      "http_request_failed",
+      { method: "POST", path, label, status: res.status, elapsedMs: ms, bodyPreview: preview(text) },
+      "warn",
     );
     throw new Error(`request failed: ${res.status} ${text}`);
   }
 
   const data = await res.json();
-  logger?.info?.(
-    `[lightrag] ✓ POST ${path}${label ? ` (${label})` : ""} status=${res.status} elapsed=${ms}ms responseBytes=${jsonBytes(data)}`,
-  );
+  logger.event("http_request_ok", {
+    method: "POST",
+    path,
+    label,
+    status: res.status,
+    elapsedMs: ms,
+    responseBytes: jsonBytes(data),
+  });
   return data;
 }
 
@@ -198,10 +236,9 @@ export class AdapterClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
-    /** LightRAG query mode – "naive" is recommended for fastest results */
+    /** LightRAG query mode from plugin config */
     private readonly queryMode: LightRagQueryMode = "naive",
-    /** Optional logger — only called when debug=true in plugin config */
-    private readonly logger?: AdapterLogger,
+    private readonly logger: PluginLogger,
   ) {}
 
   /**
@@ -213,19 +250,22 @@ export class AdapterClient {
     topK: number,
     opts?: { conversationId?: string; date?: string },
   ) {
-    // Use naive mode with chunk_top_k for fast retrieval (tested in Postman)
+    const safeTopK = Number.isFinite(topK) ? Math.max(1, Math.min(20, Math.floor(topK))) : 8;
     const body: LightRagQueryDataRequest = {
       query,
-      mode: "naive", // Vector similarity only, no knowledge graph (faster)
-      top_k: 10,
-      chunk_top_k: 8, // Limit chunks to improve performance
+      mode: this.queryMode,
+      top_k: safeTopK,
+      chunk_top_k: safeTopK,
       include_references: true,
-      enable_rerank: false, // Disable rerank to avoid warning
+      enable_rerank: false,
     };
 
-    this.logger?.info?.(
-      `[lightrag] query mode=${this.queryMode} topK=${topK} queryLen=${query.length} conv=${opts?.conversationId ?? "-"}`,
-    );
+    this.logger.event("query_start", {
+      mode: this.queryMode,
+      topK: safeTopK,
+      queryLen: query.length,
+      conversationId: opts?.conversationId || "-",
+    });
 
     const result: LightRagQueryDataResponse = await postJson(
       this.baseUrl,
@@ -274,9 +314,14 @@ export class AdapterClient {
     const relCount = Array.isArray(result.data?.relationships) ? result.data.relationships.length : 0;
     const chunkCount = Array.isArray(result.data?.chunks) ? result.data.chunks.length : 0;
 
-    this.logger?.info?.(
-      `[lightrag] query result status=${result.status} entities=${entityCount} relations=${relCount} chunks=${chunkCount} references=${refCount} contextItems=${contextItems.length}`,
-    );
+    this.logger.event("query_result", {
+      status: result.status,
+      entities: entityCount,
+      relations: relCount,
+      chunks: chunkCount,
+      references: refCount,
+      contextItems: contextItems.length,
+    });
 
     return { raw: result, contextItems };
   }
@@ -286,7 +331,7 @@ export class AdapterClient {
    * LightRAG has no per-doc fetch endpoint — return a stub.
    */
   async get(_docId: string) {
-    this.logger?.info?.(`[lightrag] get docId=${_docId} (stub — LightRAG has no per-doc endpoint)`);
+    this.logger.event("doc_get_stub", { docId: _docId });
     return { text: "" };
   }
 
@@ -305,53 +350,77 @@ export class AdapterClient {
       sender?: string;
       messageId?: string;
     }>;
-  }) {
-    const texts = payload.items
+  }): Promise<AdapterIngestResult> {
+    const baseSource = `conv:${sourceToken(payload.conversationId)}/ch:${sourceToken(payload.channel)}/date:${sourceToken(payload.date)}`;
+    const docs = payload.items
       .filter((item) => item.content && item.content.trim().length > 0)
-      .map((item) => {
+      .map((item, idx) => {
         const parts: string[] = [];
         if (item.role) parts.push(`[${item.role.toUpperCase()}]`);
         if (item.sender) parts.push(`(${item.sender})`);
         if (item.ts) parts.push(`@${item.ts}`);
         parts.push(item.content.trim());
-        return parts.join(" ");
+        const text = parts.join(" ");
+
+        const perItemKey = item.messageId
+          ? `msg:${sourceToken(item.messageId)}`
+          : item.ts
+            ? `ts:${sourceToken(item.ts)}`
+            : "msg:unknown";
+        const fileSource = `${baseSource}/${perItemKey}/i:${idx + 1}`;
+
+        return { text, fileSource };
       });
 
-    if (texts.length === 0) {
-      this.logger?.info?.(`[lightrag] ingest skip — no content after filter`);
+    if (docs.length === 0) {
+      this.logger.event("ingest_skip_no_content");
       return { status: "skipped", message: "no content" };
     }
 
+    const texts = docs.map((d) => d.text);
+    const fileSources = docs.map((d) => d.fileSource);
     const totalChars = texts.reduce((n, t) => n + t.length, 0);
     const endpoint = texts.length === 1 ? "/documents/text" : "/documents/texts";
 
-    this.logger?.info?.(
-      `[lightrag] ingest conv=${payload.conversationId} channel=${payload.channel} items=${texts.length} totalChars=${totalChars} endpoint=${endpoint}`,
-    );
-
-    const fileSources = texts.map(
-      () => `conv:${payload.conversationId}/ch:${payload.channel}/date:${payload.date}`,
-    );
+    this.logger.event("ingest_start", {
+      conversationId: payload.conversationId,
+      channel: payload.channel,
+      items: texts.length,
+      totalChars,
+      endpoint,
+    });
 
     if (texts.length === 1) {
-      return postJson(
-        this.baseUrl,
-        this.apiKey,
-        "/documents/text",
-        { text: texts[0], file_source: fileSources[0] },
-        this.logger,
-        `conv=${payload.conversationId}`,
+      const result = toIngestResult(
+        await postJson(
+          this.baseUrl,
+          this.apiKey,
+          "/documents/text",
+          { text: texts[0], file_source: fileSources[0] },
+          this.logger,
+          `conv=${payload.conversationId}`,
+        ),
       );
+      if (result.status === "failure" || result.status === "fail") {
+        throw new Error(`ingest failed: ${result.message || "unknown failure"}`);
+      }
+      return result;
     }
 
-    return postJson(
-      this.baseUrl,
-      this.apiKey,
-      "/documents/texts",
-      { texts, file_sources: fileSources },
-      this.logger,
-      `conv=${payload.conversationId} items=${texts.length}`,
+    const result = toIngestResult(
+      await postJson(
+        this.baseUrl,
+        this.apiKey,
+        "/documents/texts",
+        { texts, file_sources: fileSources },
+        this.logger,
+        `conv=${payload.conversationId} items=${texts.length}`,
+      ),
     );
+    if (result.status === "failure" || result.status === "fail") {
+      throw new Error(`ingest failed: ${result.message || "unknown failure"}`);
+    }
+    return result;
   }
 
   /**
@@ -368,7 +437,7 @@ export class AdapterClient {
       offset?: number;
     } = {},
   ) {
-    this.logger?.info?.(`[lightrag] listInbox (stub — LightRAG has no inbox endpoint)`);
+    this.logger.event("list_inbox_stub");
     return { items: [], total: 0, _note: "LightRAG has no inbox endpoint" };
   }
 
@@ -382,7 +451,7 @@ export class AdapterClient {
     mergeTargetId?: number;
     note?: string;
   }) {
-    this.logger?.info?.(`[lightrag] inboxAction (stub — LightRAG has no inbox endpoint)`);
+    this.logger.event("inbox_action_stub");
     return { ok: false, _note: "LightRAG has no inbox endpoint" };
   }
 
@@ -396,7 +465,7 @@ export class AdapterClient {
     helpful: boolean;
     comment?: string;
   }) {
-    this.logger?.info?.(`[lightrag] retrievalFeedback (stub — LightRAG has no feedback endpoint)`);
+    this.logger.event("retrieval_feedback_stub");
     return { ok: false, _note: "LightRAG has no feedback endpoint" };
   }
 

@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { AdapterClient } from "./core/adapter-client";
 import { lightragConfigSchema, parseConfig } from "./core/config";
+import { createPluginLogger } from "./core/logger";
 import { buildCaptureHandler } from "./hooks/capture";
 import { buildRecallHandler } from "./hooks/recall";
 import {
@@ -75,18 +76,36 @@ const memoryPlugin = {
 
   register(api: OpenClawPluginApi) {
     let cfg;
+    const pluginLogger = createPluginLogger(api.logger, {
+      prefix: "memory-lightrag-local",
+      debugEnabled: false,
+    });
     try {
       cfg = parseConfig(api.pluginConfig);
     } catch (err) {
-      api.logger.warn(`memory-lightrag-local: invalid config; plugin disabled: ${String(err)}`);
+      pluginLogger.event("config_invalid", { error: String(err) }, "warn");
       return;
     }
 
-    const client = new AdapterClient(cfg.baseUrl, cfg.apiKey, cfg.queryMode, cfg.debug ? api.logger : undefined);
+    const logger = createPluginLogger(api.logger, {
+      prefix: "memory-lightrag-local",
+      debugEnabled: cfg.debug,
+    });
+    const recallLogger = logger.child("recall");
+    const captureLogger = logger.child("capture");
+    const inboundLogger = logger.child("inbound");
+    const client = new AdapterClient(cfg.baseUrl, cfg.apiKey, cfg.queryMode, logger.child("lightrag"));
     const lastConversationByChannel = new Map<string, string>();
 
-    api.logger.info?.(
-      `memory-lightrag-local: register autoIngest=${cfg.autoIngest} autoRecall=${cfg.autoRecall} captureMode=${cfg.captureMode}`,
+    logger.event(
+      "register",
+      {
+        autoIngest: cfg.autoIngest,
+        autoRecall: cfg.autoRecall,
+        captureMode: cfg.captureMode,
+        queryMode: cfg.queryMode,
+      },
+      "info",
     );
 
     api.registerTool(
@@ -109,7 +128,7 @@ const memoryPlugin = {
               source: "adapter",
             }));
 
-            // Stringify results เป็น text เพื่อป้องกัน [Object Object]
+            // Render tool results as plain text to avoid "[Object Object]" output.
             const resultsText = results.map((r, i) => {
               const snippetText = typeof r.snippet === 'string' ? r.snippet : JSON.stringify(r.snippet);
               return `[${i + 1}] ${snippetText}\n    Source: ${r.source} | Path: ${r.path} | Score: ${r.score}`;
@@ -271,7 +290,7 @@ const memoryPlugin = {
         buildRecallHandler({
           cfg,
           client,
-          logger: api.logger,
+          logger: recallLogger,
           resolveConversationId: (event: Record<string, unknown>) => {
             const direct =
               (typeof event.conversationId === "string" && event.conversationId) ||
@@ -293,9 +312,10 @@ const memoryPlugin = {
 
     api.on("message_received", async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       try {
-        if (cfg.debug) {
-          api.logger.info?.(`memory-lightrag-local: message_received event success=${event.success} content=${typeof event.content}`);
-        }
+        inboundLogger.event("message_received", {
+          success: event.success,
+          contentType: typeof event.content,
+        });
 
         const channel = channelBase(String(ctx?.channelId || "unknown"));
         const fallbackFrom = typeof event.from === 'string' ? event.from : undefined;
@@ -305,13 +325,15 @@ const memoryPlugin = {
 
         const text = sanitizeCapturedText(extractText(event.content), cfg.captureMode);
         if (!text || text.length < cfg.minCaptureLength) {
-          if (cfg.debug) {
-            api.logger.info?.(`memory-lightrag-local: message_received skip text too short conv=${canonical} textLen=${text?.length || 0}`);
-          }
+          inboundLogger.event("ingest_skip_short_text", {
+            conversationId: canonical,
+            textLen: text?.length || 0,
+            minCaptureLength: cfg.minCaptureLength,
+          });
           return;
         }
 
-        await client.ingest({
+        const ingestResult = await client.ingest({
           conversationId: canonical,
           channel,
           date: toDateString(typeof event.timestamp === 'number' ? normalizeTimestamp(event.timestamp) : undefined),
@@ -326,11 +348,22 @@ const memoryPlugin = {
           ],
         });
 
-        if (cfg.debug) {
-          api.logger.info?.(`memory-lightrag-local: inbound ingest ok conv=${canonical}`);
+        const ingestStatus = String(ingestResult.status || "unknown").toLowerCase();
+        if (ingestStatus === "duplicated") {
+          inboundLogger.event("ingest_duplicate", {
+            conversationId: canonical,
+            message: ingestResult.message || "-",
+          });
+          return;
         }
+
+        inboundLogger.event(
+          "ingest_ok",
+          { conversationId: canonical, status: ingestStatus },
+          "info",
+        );
       } catch (err) {
-        api.logger.warn(`memory-lightrag-local: message_received failed: ${String(err)}`);
+        inboundLogger.event("message_received_failed", { error: String(err) }, "warn");
       }
     });
 
@@ -338,7 +371,7 @@ const memoryPlugin = {
     api.on(
       "agent_end",
       buildCaptureHandler({
-        api,
+        logger: captureLogger,
         cfg,
         client,
         lastConversationByChannel,

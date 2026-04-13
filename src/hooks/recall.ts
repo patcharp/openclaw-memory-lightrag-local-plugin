@@ -1,5 +1,6 @@
 import type { AdapterClient } from "../core/adapter-client";
 import type { LightragConfig } from "../core/config";
+import type { PluginLogger } from "../core/logger";
 
 function formatRecallContext(items: Array<{ text: string; docId?: string }>, maxResults: number): string | null {
   const dedup = new Set<string>();
@@ -31,7 +32,7 @@ function formatRecallContext(items: Array<{ text: string; docId?: string }>, max
 export function buildRecallHandler(params: {
   cfg: LightragConfig;
   client: AdapterClient;
-  logger: { debug(msg: string): void; info?: (msg: string) => void; warn(msg: string): void };
+  logger: PluginLogger;
   resolveConversationId?: (event: Record<string, unknown>) => string | undefined;
 }) {
   const { cfg, client, logger, resolveConversationId } = params;
@@ -41,9 +42,12 @@ export function buildRecallHandler(params: {
 
     // 1. Try extracting exact last user message if provided
     if (Array.isArray(event.messages) && event.messages.length > 0) {
-      const lastUserMsg = [...event.messages].reverse().find((m: any) => String(m?.role || "").toLowerCase() === "user");
+      const lastUserMsg = [...event.messages]
+        .reverse()
+        .find((m: { role?: string }) => String(m?.role || "").toLowerCase() === "user");
       if (lastUserMsg) {
-        prompt = String(lastUserMsg.content || lastUserMsg.text || "");
+        const msg = lastUserMsg as { content?: unknown; text?: unknown };
+        prompt = String(msg.content || msg.text || "");
       }
     }
 
@@ -70,9 +74,7 @@ export function buildRecallHandler(params: {
       prompt = prompt.slice(-800).trim();
     }
     if (!prompt || prompt.length < 3) {
-      if (cfg.debug) {
-        logger.info?.(`memory-lightrag-local: recall skip — prompt too short (${prompt.length} chars)`);
-      }
+      logger.event("recall_skip_short_prompt", { promptLen: prompt.length });
       return;
     }
 
@@ -82,9 +84,12 @@ export function buildRecallHandler(params: {
     try {
       const conversationId = resolveConversationId?.(event);
 
-      logger.info?.(
-        `memory-lightrag-local: recall start conv=${conversationId || "*"} topK=${cfg.maxRecallResults} mode=${cfg.queryMode} query="${queryPreview}"`,
-      );
+      logger.event("recall_start", {
+        conversationId: conversationId || "*",
+        topK: cfg.maxRecallResults,
+        mode: cfg.queryMode,
+        queryPreview,
+      });
 
       const result = await client.query(prompt, cfg.maxRecallResults, {
         ...(conversationId ? { conversationId } : {}),
@@ -94,9 +99,11 @@ export function buildRecallHandler(params: {
       const context = formatRecallContext(result.contextItems, cfg.maxRecallResults);
 
       if (!context) {
-        logger.info?.(
-          `memory-lightrag-local: recall empty conv=${conversationId || "*"} contextItems=${result.contextItems.length} elapsed=${elapsedMs}ms`,
-        );
+        logger.event("recall_empty", {
+          conversationId: conversationId || "*",
+          contextItems: result.contextItems.length,
+          elapsedMs,
+        });
         return;
       }
 
@@ -107,20 +114,25 @@ export function buildRecallHandler(params: {
         ?.slice(2, 122) ?? "";
       const snippet = firstMemoryLine.length > 0 ? `"${firstMemoryLine}${firstMemoryLine.length >= 120 ? "…" : ""}"` : "(none)";
 
-      logger.info?.(
-        `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length} elapsed=${elapsedMs}ms firstSnippet=${snippet}`,
+      logger.event(
+        "recall_inject",
+        {
+          conversationId: conversationId || "*",
+          contextItems: result.contextItems.length,
+          chars: context.length,
+          elapsedMs,
+          firstSnippet: snippet,
+        },
+        "info",
       );
 
-      // Debug mode: แสดง context preview เป็น text (ไม่ print object)
-      if (cfg.debug) {
-        const previewText = context.slice(0, 500).replace(/\n/g, " ");
-        logger.info?.(`memory-lightrag-local: recall context preview: ${previewText}`);
-      }
+      const previewText = context.slice(0, 500).replace(/\n/g, " ");
+      logger.event("recall_context_preview", { previewText });
 
       return { prependContext: context };
     } catch (err) {
       const elapsedMs = Math.round(performance.now() - recallStart);
-      logger.warn(`memory-lightrag-local: recall failed elapsed=${elapsedMs}ms error=${String(err)}`);
+      logger.event("recall_failed", { elapsedMs, error: String(err) }, "warn");
       return;
     }
   };

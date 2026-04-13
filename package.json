@@ -10,7 +10,9 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "echo 'No tests yet'",
+    "build:dist": "tsc -p tsconfig.build.json",
+    "test": "npm run test:unit",
+    "test:unit": "npm run build:dist && node --test test/**/*.test.mjs",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write '**/*.ts'"
   },

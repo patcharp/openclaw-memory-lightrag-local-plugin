@@ -88,7 +88,7 @@ export const lightragConfigSchema = {
     queryMode: {
       type: "string",
       enum: ["local", "global", "hybrid", "naive", "mix", "bypass"],
-      description: "LightRAG query mode. 'naive' (default) combines knowledge graph + vector search for best results",
+      description: "LightRAG query mode. 'mix' combines knowledge graph + vector search; 'naive' uses vector similarity only",
       default: "naive"
     },
     autoIngest: {
