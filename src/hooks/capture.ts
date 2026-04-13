@@ -5,10 +5,23 @@ import {
   channelBase,
   clipText,
   extractText,
+  extractUntrustedMetadata,
   normalizeConversationId,
+  normalizeTimestamp,
   sanitizeCapturedText,
   toDateString,
 } from "../core/sanitize";
+
+interface EventContext {
+  runId: string;
+  agentId: string;
+  sessionKey: string;
+  sessionId: string;
+  workspaceDir: string;
+  messageProvider: string;
+  trigger: string;
+  channelId: string;
+}
 
 type MessageLike = {
   role?: string;
@@ -16,6 +29,18 @@ type MessageLike = {
   text?: string;
   output_text?: string;
   output?: unknown;
+  sender?: string;
+  from?: string;
+  name?: string;
+  ts?: unknown;
+  timestamp?: unknown;
+  created_at?: unknown;
+  createdAt?: unknown;
+  date?: unknown;
+  messageId?: string;
+  message_id?: string;
+  id?: string;
+  metadata?: unknown;
 };
 
 function getLastTurn(messages: unknown[]): unknown[] {
@@ -30,8 +55,35 @@ function getLastTurn(messages: unknown[]): unknown[] {
   return lastUserIdx >= 0 ? messages.slice(lastUserIdx) : messages;
 }
 
-function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"): Array<{ role: "user" | "assistant"; text: string }> {
-  const out: Array<{ role: "user" | "assistant"; text: string }> = [];
+function firstString(...values: Array<unknown>): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function toIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(normalizeTimestamp(value)).toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return undefined;
+}
+
+type TurnText = {
+  role: "user" | "assistant";
+  text: string;
+  sender?: string;
+  ts?: string;
+  messageId?: string;
+  senderId?: string;
+};
+
+function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"): TurnText[] {
+  const out: TurnText[] = [];
 
   for (const msg of lastTurn) {
     if (!msg || typeof msg !== "object") continue;
@@ -40,10 +92,36 @@ function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"
     if (role !== "user" && role !== "assistant") continue;
 
     const raw = extractText(m.content ?? m.text ?? m.output_text ?? m.output ?? "");
+    const untrusted = extractUntrustedMetadata(raw);
     const text = sanitizeCapturedText(raw, captureMode);
     if (!text) continue;
 
-    out.push({ role: role as "user" | "assistant", text });
+    const metadata = (m.metadata && typeof m.metadata === "object")
+      ? (m.metadata as Record<string, unknown>)
+      : {};
+    const sender = firstString(
+      m.sender,
+      m.name,
+      m.from,
+      metadata.sender,
+      metadata.display_name,
+      untrusted.sender,
+      role === "assistant" ? "assistant" : undefined,
+    );
+    const ts = toIsoTimestamp(
+      m.ts ??
+      m.timestamp ??
+      m.created_at ??
+      m.createdAt ??
+      m.date ??
+      metadata.ts ??
+      metadata.timestamp ??
+      untrusted.timestamp,
+    );
+    const messageId = firstString(m.messageId, m.message_id, m.id, metadata.messageId, metadata.message_id, untrusted.messageId);
+    const senderId = firstString(metadata.sender_id, metadata.senderId, untrusted.senderId);
+
+    out.push({ role: role as "user" | "assistant", text, sender, ts, messageId, senderId });
   }
 
   return out;
@@ -58,7 +136,7 @@ export function buildCaptureHandler(params: {
   const { logger, cfg, client, lastConversationByChannel } = params;
   const lastAssistantSigByConversation = new Map<string, string>();
 
-  return async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+  return async (event: Record<string, unknown>, ctx?: EventContext) => {
     logger.event("capture_event", {
       success: event.success,
       messages: Array.isArray(event.messages) ? event.messages.length : "none",
@@ -73,15 +151,26 @@ export function buildCaptureHandler(params: {
       return;
     }
 
-    const provider = channelBase(String(ctx?.messageProvider || ctx?.channelId || "unknown"));
-    const canonicalConversation =
-      lastConversationByChannel.get(provider) || `${provider}:unknown`;
-    const conversationId = normalizeConversationId(provider, canonicalConversation);
-
-    logger.event("capture_conversation_resolved", { conversationId, provider });
-
     const lastTurn = getLastTurn(event.messages);
-    const texts = extractTurnTexts(lastTurn, cfg.captureMode)
+    const extracted = extractTurnTexts(lastTurn, cfg.captureMode);
+    const senderIdFallback = [...extracted].reverse().find((x) => x.role === "user" && x.senderId)?.senderId;
+
+    const provider = channelBase(String(ctx?.messageProvider || ctx?.channelId || "unknown"));
+    const knownConversation =
+      firstString(
+        event.conversationId,
+        event.channelConversationId,
+        ctx?.sessionId,
+        lastConversationByChannel.get(provider),
+        senderIdFallback,
+        ctx?.runId,
+      ) || `${provider}:unknown`;
+    const conversationId = normalizeConversationId(provider, knownConversation);
+    lastConversationByChannel.set(provider, conversationId);
+
+    logger.event("capture_conversation_resolved", { conversationId, provider, senderIdFallback: senderIdFallback || "-" });
+
+    const texts = extracted
       .map((t) => ({ ...t, text: clipText(t.text) }))
       .filter((t) => t.text.length >= cfg.minCaptureLength);
 
@@ -120,15 +209,18 @@ export function buildCaptureHandler(params: {
 
     try {
       const captureStart = performance.now();
+      const firstTs = texts.find((t) => t.ts)?.ts;
+      const ingestDate = firstTs ? toDateString(new Date(firstTs).getTime()) : toDateString();
       const ingestResult = await client.ingest({
         conversationId,
         channel: provider,
-        date: toDateString(),
+        date: ingestDate,
         items: texts.map((t) => ({
           role: t.role,
           content: t.text,
-          ts: new Date().toISOString(),
-          sender: t.role === "assistant" ? "assistant" : undefined,
+          ts: t.ts,
+          sender: t.sender,
+          messageId: t.messageId,
         })),
       });
 

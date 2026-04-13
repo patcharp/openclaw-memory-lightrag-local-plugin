@@ -41,8 +41,77 @@ export function sanitizeText(raw: string): string {
   return raw.replace(/\u0000/g, "").replace(/\r\n/g, "\n").trim();
 }
 
+export type UntrustedMetadata = {
+  sender?: string;
+  senderId?: string;
+  messageId?: string;
+  timestamp?: string;
+};
+
+function untrustedMetadataBlockRegex() {
+  return /\s*(Conversation info|Sender)\s+\(untrusted metadata\):\s*```(?:json)?\s*([\s\S]*?)\s*```\s*/gi;
+}
+
+function firstString(...values: Array<unknown>): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function parseLooseJsonObject(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+export function extractUntrustedMetadata(raw: string): UntrustedMetadata {
+  const text = sanitizeText(raw);
+  const out: UntrustedMetadata = {};
+
+  for (const match of text.matchAll(untrustedMetadataBlockRegex())) {
+    const body = String(match[2] || "");
+    const parsed = parseLooseJsonObject(body);
+    const sender = firstString(parsed.sender, parsed.name, parsed.first_name, parsed.username);
+    const senderId = firstString(parsed.sender_id, parsed.user_id, parsed.id);
+    const messageId = firstString(parsed.message_id, parsed.messageId, parsed.id);
+    const timestamp = firstString(parsed.timestamp, parsed.ts, parsed.time, parsed.date);
+
+    if (!out.sender && sender) out.sender = sender;
+    if (!out.senderId && senderId) out.senderId = senderId;
+    if (!out.messageId && messageId) out.messageId = messageId;
+    if (!out.timestamp && timestamp) out.timestamp = timestamp;
+  }
+
+  if (!out.sender) {
+    const m = text.match(/"sender"\s*:\s*"([^"]+)"/i);
+    if (m?.[1]) out.sender = m[1].trim();
+  }
+  if (!out.senderId) {
+    const m = text.match(/"sender_id"\s*:\s*"([^"]+)"/i);
+    if (m?.[1]) out.senderId = m[1].trim();
+  }
+  if (!out.messageId) {
+    const m = text.match(/"message_id"\s*:\s*"([^"]+)"/i);
+    if (m?.[1]) out.messageId = m[1].trim();
+  }
+  if (!out.timestamp) {
+    const m = text.match(/"timestamp"\s*:\s*"([^"]+)"/i);
+    if (m?.[1]) out.timestamp = m[1].trim();
+  }
+
+  return out;
+}
+
+export function stripUntrustedMetadataBlocks(raw: string): string {
+  return sanitizeText(raw).replace(untrustedMetadataBlockRegex(), "").trim();
+}
+
 export function sanitizeCapturedText(raw: string, mode: "all" | "everything"): string {
-  let text = sanitizeText(raw);
+  let text = stripUntrustedMetadataBlocks(raw);
   if (mode === "all") {
     text = text.replace(/<lightrag-context>[\s\S]*?<\/lightrag-context>\s*/gi, "");
     text = text.replace(/<supermemory-context>[\s\S]*?<\/supermemory-context>\s*/gi, "");

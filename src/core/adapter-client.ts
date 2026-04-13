@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PluginLogger } from "./logger";
 
 /**
@@ -50,6 +51,10 @@ function sourceToken(value: string, maxLen = 120): string {
     .replace(/\s+/g, "_")
     .replace(/[^a-zA-Z0-9:_./-]/g, "_")
     .slice(0, maxLen);
+}
+
+function shortHash(value: string, len = 12): string {
+  return createHash("sha1").update(value).digest("hex").slice(0, len);
 }
 
 function toIngestResult(data: unknown): AdapterIngestResult {
@@ -350,7 +355,7 @@ export class AdapterClient {
       messageId?: string;
     }>;
   }): Promise<AdapterIngestResult> {
-    const baseSource = `conv:${sourceToken(payload.conversationId)}/ch:${sourceToken(payload.channel)}/date:${sourceToken(payload.date)}`;
+    const baseSource = `conv:${sourceToken(payload.conversationId)}/ch:${sourceToken(payload.channel)}`;
     const docs = payload.items
       .filter((item) => item.content && item.content.trim().length > 0)
       .map((item, idx) => {
@@ -361,12 +366,18 @@ export class AdapterClient {
         parts.push(item.content.trim());
         const text = parts.join(" ");
 
-        const perItemKey = item.messageId
-          ? `msg:${sourceToken(item.messageId)}`
-          : item.ts
-            ? `ts:${sourceToken(item.ts)}`
-            : "msg:unknown";
-        const fileSource = `${baseSource}/${perItemKey}/i:${idx + 1}`;
+        const itemSeed = [
+          item.messageId || "",
+          item.role || "",
+          item.sender || "",
+          item.ts || "",
+          item.content.trim().slice(0, 512),
+          String(idx + 1),
+        ].join("|");
+        const hashed = shortHash(itemSeed);
+        const messagePart = item.messageId ? `m_${sourceToken(item.messageId, 48)}` : "h";
+        const perItemKey = `item:${messagePart}_${hashed}`;
+        const fileSource = `${baseSource}/${perItemKey}`;
 
         return { text, fileSource };
       });

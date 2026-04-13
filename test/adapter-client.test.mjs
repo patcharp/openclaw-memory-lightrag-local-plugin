@@ -60,6 +60,8 @@ test("query always uses naive mode and sends stable body", async (t) => {
   assert.equal(capturedBody.mode, "naive");
   assert.equal(capturedBody.top_k, 3);
   assert.equal(Object.hasOwn(capturedBody, "chunk_top_k"), false);
+  assert.equal(Object.hasOwn(capturedBody, "include_references"), false);
+  assert.equal(Object.hasOwn(capturedBody, "enable_rerank"), false);
   assert.equal(result.contextItems.length, 1);
   assert.equal(result.contextItems[0].text, "chunk text");
 });
@@ -119,8 +121,8 @@ test("ingest sends unique file_sources for each item", async (t) => {
   assert.equal(capturedBody.texts.length, 2);
   assert.equal(capturedBody.file_sources.length, 2);
   assert.notEqual(capturedBody.file_sources[0], capturedBody.file_sources[1]);
-  assert.match(capturedBody.file_sources[0], /\/i:1$/);
-  assert.match(capturedBody.file_sources[1], /\/i:2$/);
+  assert.match(capturedBody.file_sources[0], /\/item:m_msg_1-[a-f0-9]{12}$/);
+  assert.match(capturedBody.file_sources[1], /\/item:h-[a-f0-9]{12}$/);
 });
 
 test("ingest throws when LightRAG returns failure status", async (t) => {

@@ -7,6 +7,7 @@ import { buildRecallHandler } from "./hooks/recall";
 import {
   channelBase,
   extractText,
+  extractUntrustedMetadata,
   normalizeConversationId,
   normalizeTimestamp,
   resolveConversationId,
@@ -66,6 +67,24 @@ const MemoryRetrievalFeedbackSchema = {
   },
   required: ["queryId", "helpful"],
 };
+
+function firstString(...values: Array<unknown>): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function toIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(normalizeTimestamp(value)).toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return undefined;
+}
 
 const memoryPlugin = {
   id: "memory-lightrag-local",
@@ -318,12 +337,14 @@ const memoryPlugin = {
         });
 
         const channel = channelBase(String(ctx?.channelId || "unknown"));
-        const fallbackFrom = typeof event.from === 'string' ? event.from : undefined;
+        const rawText = extractText(event.content);
+        const untrusted = extractUntrustedMetadata(rawText);
+        const fallbackFrom = firstString(event.from, untrusted.senderId);
         const conversationId = resolveConversationId(ctx || {}, fallbackFrom);
         const canonical = normalizeConversationId(channel, conversationId);
         lastConversationByChannel.set(channel, canonical);
 
-        const text = sanitizeCapturedText(extractText(event.content), cfg.captureMode);
+        const text = sanitizeCapturedText(rawText, cfg.captureMode);
         if (!text || text.length < cfg.minCaptureLength) {
           inboundLogger.event("ingest_skip_short_text", {
             conversationId: canonical,
@@ -333,17 +354,24 @@ const memoryPlugin = {
           return;
         }
 
+        const metadata = (event.metadata && typeof event.metadata === "object")
+          ? (event.metadata as Record<string, unknown>)
+          : {};
+        const ts = toIsoTimestamp(event.timestamp) || toIsoTimestamp(untrusted.timestamp);
+        const messageId = firstString(metadata.messageId, metadata.message_id, untrusted.messageId);
+        const sender = firstString(untrusted.sender, event.from);
+
         const ingestResult = await client.ingest({
           conversationId: canonical,
           channel,
-          date: toDateString(typeof event.timestamp === 'number' ? normalizeTimestamp(event.timestamp) : undefined),
+          date: ts ? toDateString(new Date(ts).getTime()) : toDateString(),
           items: [
             {
               role: "user",
               content: text,
-              ts: typeof event.timestamp === 'number' ? new Date(normalizeTimestamp(event.timestamp)).toISOString() : undefined,
-              sender: fallbackFrom,
-              messageId: (event.metadata && typeof event.metadata === 'object' && event.metadata !== null && 'messageId' in event.metadata && typeof event.metadata.messageId === 'string') ? event.metadata.messageId : undefined,
+              ts,
+              sender,
+              messageId,
             },
           ],
         });
