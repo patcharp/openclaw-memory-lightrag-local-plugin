@@ -37,7 +37,38 @@ export function buildRecallHandler(params: {
   const { cfg, client, logger, resolveConversationId } = params;
 
   return async (event: Record<string, unknown>) => {
-    const prompt = typeof event.prompt === "string" ? event.prompt.trim() : "";
+    let prompt = "";
+
+    // 1. Try extracting exact last user message if provided
+    if (Array.isArray(event.messages) && event.messages.length > 0) {
+      const lastUserMsg = [...event.messages].reverse().find((m: any) => String(m?.role || "").toLowerCase() === "user");
+      if (lastUserMsg) {
+        prompt = String(lastUserMsg.content || lastUserMsg.text || "");
+      }
+    }
+
+    // 2. Fallback to event.prompt
+    if (!prompt) {
+      prompt = typeof event.prompt === "string" ? event.prompt : "";
+      
+      // Remove OpenClaw injected metadata blocks
+      const metaStart = prompt.indexOf("Conversation info (untrusted metadata):");
+      if (metaStart !== -1) {
+        const blockEnd = prompt.indexOf("```", metaStart + 40);
+        if (blockEnd !== -1) {
+          prompt = prompt.slice(0, metaStart) + prompt.slice(blockEnd + 3);
+        } else {
+          prompt = prompt.slice(0, metaStart);
+        }
+      }
+    }
+
+    // Clean up and truncate huge prompts
+    prompt = prompt.trim();
+    if (prompt.length > 800) {
+      // User's actual question is usually at the end
+      prompt = prompt.slice(-800).trim();
+    }
     if (!prompt || prompt.length < 3) {
       if (cfg.debug) {
         logger.debug(`memory-lightrag-local: recall skip — prompt too short (${prompt.length} chars)`);

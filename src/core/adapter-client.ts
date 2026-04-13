@@ -56,6 +56,7 @@ async function getJson(
   const res = await fetch(url, {
     method: "GET",
     headers: { "X-API-Key": apiKey },
+    signal: AbortSignal.timeout(30000),
   });
 
   const ms = elapsedMs(start);
@@ -94,6 +95,7 @@ async function postJson(
       "X-API-Key": apiKey,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
   });
 
   const ms = elapsedMs(start);
