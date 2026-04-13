@@ -85,7 +85,7 @@ const memoryPlugin = {
     const client = new AdapterClient(cfg.baseUrl, cfg.apiKey, cfg.queryMode, cfg.debug ? api.logger : undefined);
     const lastConversationByChannel = new Map<string, string>();
 
-    api.logger.warn(
+    api.logger.info?.(
       `memory-lightrag-local: register autoIngest=${cfg.autoIngest} autoRecall=${cfg.autoRecall} captureMode=${cfg.captureMode}`,
     );
 
@@ -293,6 +293,10 @@ const memoryPlugin = {
 
     api.on("message_received", async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       try {
+        if (cfg.debug) {
+          api.logger.info?.(`memory-lightrag-local: message_received event success=${event.success} content=${typeof event.content}`);
+        }
+
         const channel = channelBase(String(ctx?.channelId || "unknown"));
         const fallbackFrom = typeof event.from === 'string' ? event.from : undefined;
         const conversationId = resolveConversationId(ctx || {}, fallbackFrom);
@@ -300,7 +304,12 @@ const memoryPlugin = {
         lastConversationByChannel.set(channel, canonical);
 
         const text = sanitizeCapturedText(extractText(event.content), cfg.captureMode);
-        if (!text || text.length < cfg.minCaptureLength) return;
+        if (!text || text.length < cfg.minCaptureLength) {
+          if (cfg.debug) {
+            api.logger.info?.(`memory-lightrag-local: message_received skip text too short conv=${canonical} textLen=${text?.length || 0}`);
+          }
+          return;
+        }
 
         await client.ingest({
           conversationId: canonical,
@@ -318,7 +327,7 @@ const memoryPlugin = {
         });
 
         if (cfg.debug) {
-          api.logger.debug(`memory-lightrag-local: inbound ingest ok conv=${canonical}`);
+          api.logger.info?.(`memory-lightrag-local: inbound ingest ok conv=${canonical}`);
         }
       } catch (err) {
         api.logger.warn(`memory-lightrag-local: message_received failed: ${String(err)}`);

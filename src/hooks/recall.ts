@@ -31,7 +31,7 @@ function formatRecallContext(items: Array<{ text: string; docId?: string }>, max
 export function buildRecallHandler(params: {
   cfg: LightragConfig;
   client: AdapterClient;
-  logger: { debug(msg: string): void; warn(msg: string): void };
+  logger: { debug(msg: string): void; info?: (msg: string) => void; warn(msg: string): void };
   resolveConversationId?: (event: Record<string, unknown>) => string | undefined;
 }) {
   const { cfg, client, logger, resolveConversationId } = params;
@@ -71,7 +71,7 @@ export function buildRecallHandler(params: {
     }
     if (!prompt || prompt.length < 3) {
       if (cfg.debug) {
-        logger.debug(`memory-lightrag-local: recall skip — prompt too short (${prompt.length} chars)`);
+        logger.info?.(`memory-lightrag-local: recall skip — prompt too short (${prompt.length} chars)`);
       }
       return;
     }
@@ -82,7 +82,7 @@ export function buildRecallHandler(params: {
     try {
       const conversationId = resolveConversationId?.(event);
 
-      logger.warn(
+      logger.info?.(
         `memory-lightrag-local: recall start conv=${conversationId || "*"} topK=${cfg.maxRecallResults} mode=${cfg.queryMode} query="${queryPreview}"`,
       );
 
@@ -94,7 +94,7 @@ export function buildRecallHandler(params: {
       const context = formatRecallContext(result.contextItems, cfg.maxRecallResults);
 
       if (!context) {
-        logger.warn(
+        logger.info?.(
           `memory-lightrag-local: recall empty conv=${conversationId || "*"} contextItems=${result.contextItems.length} elapsed=${elapsedMs}ms`,
         );
         return;
@@ -107,14 +107,14 @@ export function buildRecallHandler(params: {
         ?.slice(2, 122) ?? "";
       const snippet = firstMemoryLine.length > 0 ? `"${firstMemoryLine}${firstMemoryLine.length >= 120 ? "…" : ""}"` : "(none)";
 
-      logger.warn(
+      logger.info?.(
         `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length} elapsed=${elapsedMs}ms firstSnippet=${snippet}`,
       );
 
       // Debug mode: แสดง context preview เป็น text (ไม่ print object)
       if (cfg.debug) {
         const previewText = context.slice(0, 500).replace(/\n/g, " ");
-        logger.debug(`memory-lightrag-local: recall context preview: ${previewText}`);
+        logger.info?.(`memory-lightrag-local: recall context preview: ${previewText}`);
       }
 
       return { prependContext: context };

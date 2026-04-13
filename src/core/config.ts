@@ -56,12 +56,12 @@ export function parseConfig(raw: unknown): LightragConfig {
   const maxRecallResults = Number(cfg.maxRecallResults ?? 8);
   const minCaptureLength = Number(cfg.minCaptureLength ?? 10);
 
-  const rawQueryMode = typeof cfg.queryMode === "string" ? cfg.queryMode as QueryMode : "mix";
+  const rawQueryMode = typeof cfg.queryMode === "string" ? cfg.queryMode as QueryMode : "naive";
 
   return {
     baseUrl,
     apiKey,
-    queryMode: VALID_QUERY_MODES.includes(rawQueryMode) ? rawQueryMode : "mix",
+    queryMode: VALID_QUERY_MODES.includes(rawQueryMode) ? rawQueryMode : "naive",
     autoIngest: cfg.autoIngest === false ? false : true,
     autoRecall: cfg.autoRecall === false ? false : true,
     maxRecallResults: Number.isFinite(maxRecallResults)
@@ -88,8 +88,8 @@ export const lightragConfigSchema = {
     queryMode: {
       type: "string",
       enum: ["local", "global", "hybrid", "naive", "mix", "bypass"],
-      description: "LightRAG query mode. 'mix' (default) combines knowledge graph + vector search for best results",
-      default: "mix"
+      description: "LightRAG query mode. 'naive' (default) combines knowledge graph + vector search for best results",
+      default: "naive"
     },
     autoIngest: {
       type: "boolean",

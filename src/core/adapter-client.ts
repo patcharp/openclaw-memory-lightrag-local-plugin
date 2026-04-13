@@ -16,6 +16,7 @@ export type AdapterContextItem = { text: string; docId?: string };
 
 export interface AdapterLogger {
   debug(msg: string): void;
+  info?: (msg: string) => void;
   warn(msg: string): void;
 }
 
@@ -68,7 +69,7 @@ async function getJson(
   }
 
   const data = await res.json();
-  logger?.debug(
+  logger?.info?.(
     `[lightrag] ✓ GET ${path}${label ? ` (${label})` : ""} status=${res.status} elapsed=${ms}ms responseBytes=${jsonBytes(data)}`,
   );
   return data;
@@ -86,7 +87,7 @@ async function postJson(
   const url = `${baseUrl}${path}`;
   const reqBytes = jsonBytes(body);
 
-  logger?.debug(`[lightrag] → POST ${path}${label ? ` (${label})` : ""} requestBytes=${reqBytes}`);
+  logger?.info?.(`[lightrag] → POST ${path}${label ? ` (${label})` : ""} requestBytes=${reqBytes}`);
 
   const res = await fetch(url, {
     method: "POST",
@@ -109,7 +110,7 @@ async function postJson(
   }
 
   const data = await res.json();
-  logger?.debug(
+  logger?.info?.(
     `[lightrag] ✓ POST ${path}${label ? ` (${label})` : ""} status=${res.status} elapsed=${ms}ms responseBytes=${jsonBytes(data)}`,
   );
   return data;
@@ -197,8 +198,8 @@ export class AdapterClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
-    /** LightRAG query mode – "mix" is recommended for best results */
-    private readonly queryMode: LightRagQueryMode = "mix",
+    /** LightRAG query mode – "naive" is recommended for fastest results */
+    private readonly queryMode: LightRagQueryMode = "naive",
     /** Optional logger — only called when debug=true in plugin config */
     private readonly logger?: AdapterLogger,
   ) {}
@@ -216,13 +217,11 @@ export class AdapterClient {
     const body: LightRagQueryDataRequest = {
       query,
       mode: "naive", // Vector similarity only, no knowledge graph (faster)
-      top_k: 10,
-      chunk_top_k: 8, // Limit chunks to improve performance
       include_references: true,
       enable_rerank: false, // Disable rerank to avoid warning
     };
 
-    this.logger?.debug(
+    this.logger?.info?.(
       `[lightrag] query mode=${this.queryMode} topK=${topK} queryLen=${query.length} conv=${opts?.conversationId ?? "-"}`,
     );
 
@@ -273,7 +272,7 @@ export class AdapterClient {
     const relCount = Array.isArray(result.data?.relationships) ? result.data.relationships.length : 0;
     const chunkCount = Array.isArray(result.data?.chunks) ? result.data.chunks.length : 0;
 
-    this.logger?.debug(
+    this.logger?.info?.(
       `[lightrag] query result status=${result.status} entities=${entityCount} relations=${relCount} chunks=${chunkCount} references=${refCount} contextItems=${contextItems.length}`,
     );
 
@@ -285,7 +284,7 @@ export class AdapterClient {
    * LightRAG has no per-doc fetch endpoint — return a stub.
    */
   async get(_docId: string) {
-    this.logger?.debug(`[lightrag] get docId=${_docId} (stub — LightRAG has no per-doc endpoint)`);
+    this.logger?.info?.(`[lightrag] get docId=${_docId} (stub — LightRAG has no per-doc endpoint)`);
     return { text: "" };
   }
 
@@ -317,14 +316,14 @@ export class AdapterClient {
       });
 
     if (texts.length === 0) {
-      this.logger?.debug(`[lightrag] ingest skip — no content after filter`);
+      this.logger?.info?.(`[lightrag] ingest skip — no content after filter`);
       return { status: "skipped", message: "no content" };
     }
 
     const totalChars = texts.reduce((n, t) => n + t.length, 0);
     const endpoint = texts.length === 1 ? "/documents/text" : "/documents/texts";
 
-    this.logger?.debug(
+    this.logger?.info?.(
       `[lightrag] ingest conv=${payload.conversationId} channel=${payload.channel} items=${texts.length} totalChars=${totalChars} endpoint=${endpoint}`,
     );
 
@@ -367,7 +366,7 @@ export class AdapterClient {
       offset?: number;
     } = {},
   ) {
-    this.logger?.debug(`[lightrag] listInbox (stub — LightRAG has no inbox endpoint)`);
+    this.logger?.info?.(`[lightrag] listInbox (stub — LightRAG has no inbox endpoint)`);
     return { items: [], total: 0, _note: "LightRAG has no inbox endpoint" };
   }
 
@@ -381,7 +380,7 @@ export class AdapterClient {
     mergeTargetId?: number;
     note?: string;
   }) {
-    this.logger?.debug(`[lightrag] inboxAction (stub — LightRAG has no inbox endpoint)`);
+    this.logger?.info?.(`[lightrag] inboxAction (stub — LightRAG has no inbox endpoint)`);
     return { ok: false, _note: "LightRAG has no inbox endpoint" };
   }
 
@@ -395,7 +394,7 @@ export class AdapterClient {
     helpful: boolean;
     comment?: string;
   }) {
-    this.logger?.debug(`[lightrag] retrievalFeedback (stub — LightRAG has no feedback endpoint)`);
+    this.logger?.info?.(`[lightrag] retrievalFeedback (stub — LightRAG has no feedback endpoint)`);
     return { ok: false, _note: "LightRAG has no feedback endpoint" };
   }
 

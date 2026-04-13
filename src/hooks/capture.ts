@@ -49,7 +49,7 @@ function extractTurnTexts(lastTurn: unknown[], captureMode: "all" | "everything"
 }
 
 export function buildCaptureHandler(params: {
-  api: { logger: { debug(msg: string): void; warn(msg: string): void } };
+  api: { logger: { debug(msg: string): void; info?: (msg: string) => void; warn(msg: string): void } };
   cfg: LightragConfig;
   client: AdapterClient;
   lastConversationByChannel: Map<string, string>;
@@ -58,8 +58,15 @@ export function buildCaptureHandler(params: {
   const lastAssistantSigByConversation = new Map<string, string>();
 
   return async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+    // Log event entry for debugging
+    if (cfg.debug) {
+      api.logger.info?.(
+        `memory-lightrag-local: capture event success=${event.success} messages=${Array.isArray(event.messages) ? event.messages.length : "none"} ctx=${JSON.stringify(ctx || {})}`,
+      );
+    }
+
     if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
-      api.logger.warn(
+      api.logger.info?.(
         `memory-lightrag-local: capture skip (invalid/empty event) success=${event.success} messages=${Array.isArray(event.messages) ? event.messages.length : "none"}`,
       );
       return;
@@ -70,21 +77,33 @@ export function buildCaptureHandler(params: {
       lastConversationByChannel.get(provider) || `${provider}:unknown`;
     const conversationId = normalizeConversationId(provider, canonicalConversation);
 
+    if (cfg.debug) {
+      api.logger.info?.(
+        `memory-lightrag-local: capture conv=${conversationId} provider=${provider}`,
+      );
+    }
+
     const lastTurn = getLastTurn(event.messages);
     const texts = extractTurnTexts(lastTurn, cfg.captureMode)
       .map((t) => ({ ...t, text: clipText(t.text) }))
       .filter((t) => t.text.length >= cfg.minCaptureLength);
 
     if (texts.length === 0) {
-      api.logger.warn(
+      api.logger.info?.(
         `memory-lightrag-local: capture skip (no eligible text) conv=${conversationId} provider=${provider} mode=${cfg.captureMode} minLen=${cfg.minCaptureLength}`,
       );
       return;
     }
 
+    if (cfg.debug) {
+      api.logger.info?.(
+        `memory-lightrag-local: capture extracted=${texts.length} roles=${texts.map((t) => t.role).join(",")}`,
+      );
+    }
+
     const assistant = [...texts].reverse().find((x) => x.role === "assistant");
     if (!assistant) {
-      api.logger.warn(
+      api.logger.info?.(
         `memory-lightrag-local: capture skip (no assistant output in last turn) conv=${conversationId} found=${texts.map((t) => t.role).join(",")}`,
       );
       return;
@@ -92,7 +111,9 @@ export function buildCaptureHandler(params: {
 
     const sig = `${conversationId}|assistant|${assistant.text}`;
     if (lastAssistantSigByConversation.get(conversationId) === sig) {
-      if (cfg.debug) api.logger.debug(`memory-lightrag-local: capture dedupe skip conv=${conversationId}`);
+      if (cfg.debug) {
+        api.logger.info?.(`memory-lightrag-local: capture dedupe skip conv=${conversationId}`);
+      }
       return;
     }
     lastAssistantSigByConversation.set(conversationId, sig);
@@ -114,7 +135,7 @@ export function buildCaptureHandler(params: {
       const elapsedMs = Math.round(performance.now() - captureStart);
       const totalChars = texts.reduce((n, t) => n + t.text.length, 0);
       const roles = texts.map((t) => t.role).join(",");
-      api.logger.warn(
+      api.logger.info?.(
         `memory-lightrag-local: capture ok conv=${conversationId} provider=${provider} items=${texts.length} roles=${roles} totalChars=${totalChars} elapsed=${elapsedMs}ms`,
       );
     } catch (err) {
