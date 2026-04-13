@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-13
+
+### Fixed
+
+- **LightRAG Delay / Hang on mix mode**: Replaced full prompt (containing huge JSON metadata) with only the exact last user message as the recall query, drastically reducing backend latency. Truncated fallback queries to 800 characters to prevent Memory Exhaustion.
+- **Hook stalls**: Added a 30s `AbortSignal` timeout to all interactions with LightRAG API to prevent OpenClaw from stalling forever when LightRAG hangs.
+- **Endpoint update for speed**: Changed recall query endpoint from `/query` to `/query/data` to retrieve raw data, bypassing slow LLM generation (`only_need_context` was also injected). Extracting actual raw knowledge fragments from `result.references`.
+- **Visibility**: Improved observability for `autoCapture` and `autoRecall` hooks with always-on (`warn`) logs including timing (`elapsedMs`) and response snippet previews.
+
 ## [0.3.0] - 2026-04-13
 
 ### Fixed

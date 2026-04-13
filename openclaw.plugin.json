@@ -2,7 +2,7 @@
   "id": "memory-lightrag-local",
   "name": "Memory (LightRAG Local)",
   "description": "OpenClaw plugin for LightRAG local memory backend",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "kind": "memory",
   "uiHints": {
     "baseUrl": {
