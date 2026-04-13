@@ -217,6 +217,8 @@ export class AdapterClient {
     const body: LightRagQueryDataRequest = {
       query,
       mode: "naive", // Vector similarity only, no knowledge graph (faster)
+      top_k: 10,
+      chunk_top_k: 8, // Limit chunks to improve performance
       include_references: true,
       enable_rerank: false, // Disable rerank to avoid warning
     };
