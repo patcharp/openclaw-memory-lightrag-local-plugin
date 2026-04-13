@@ -115,22 +115,79 @@ async function postJson(
   return data;
 }
 
-// ── Query types (LightRAG /query request) ─────────────────────────────────
+// ── Query types (LightRAG /query/data request) ─────────────────────────────
 
 type LightRagQueryMode = "local" | "global" | "hybrid" | "naive" | "mix" | "bypass";
 
-interface LightRagQueryRequest {
+interface LightRagQueryDataRequest {
   query: string;
   mode?: LightRagQueryMode;
   top_k?: number;
+  chunk_top_k?: number;
   include_references?: boolean;
-  conversation_history?: Array<{ role: string; content: string }>;
-  only_need_context?: boolean;
+  hl_keywords?: string[];
+  ll_keywords?: string[];
 }
 
-interface LightRagQueryResponse {
-  response: string;
-  references?: Array<{ reference_id: string; file_path: string; content?: string[] }>;
+interface LightRagQueryDataEntity {
+  entity_name: string;
+  entity_type: string;
+  description: string;
+  source_id: string;
+  file_path: string;
+  reference_id: string;
+}
+
+interface LightRagQueryDataRelationship {
+  src_id: string;
+  tgt_id: string;
+  description: string;
+  keywords: string;
+  weight: number;
+  source_id: string;
+  file_path: string;
+  reference_id: string;
+}
+
+interface LightRagQueryDataChunk {
+  content: string;
+  file_path: string;
+  chunk_id: string;
+  reference_id: string;
+}
+
+interface LightRagQueryDataReference {
+  reference_id: string;
+  file_path: string;
+}
+
+interface LightRagQueryDataData {
+  entities: LightRagQueryDataEntity[];
+  relationships: LightRagQueryDataRelationship[];
+  chunks: LightRagQueryDataChunk[];
+  references: LightRagQueryDataReference[];
+}
+
+interface LightRagQueryDataMetadata {
+  query_mode: string;
+  keywords?: {
+    high_level: string[];
+    low_level: string[];
+  };
+  processing_info?: {
+    total_entities_found: number;
+    total_relations_found: number;
+    entities_after_truncation: number;
+    relations_after_truncation: number;
+    final_chunks_count: number;
+  };
+}
+
+interface LightRagQueryDataResponse {
+  status: string;
+  message: string;
+  data: LightRagQueryDataData;
+  metadata: LightRagQueryDataMetadata;
 }
 
 // ── Main client ────────────────────────────────────────────────────────────
@@ -154,19 +211,18 @@ export class AdapterClient {
     topK: number,
     opts?: { conversationId?: string; date?: string },
   ) {
-    const body: LightRagQueryRequest = {
+    const body: LightRagQueryDataRequest = {
       query,
       mode: this.queryMode,
       top_k: topK,
       include_references: true,
-      only_need_context: true, // Skip LLM generation phase, just return graph contexts
     };
 
     this.logger?.debug(
       `[lightrag] query mode=${this.queryMode} topK=${topK} queryLen=${query.length} conv=${opts?.conversationId ?? "-"}`,
     );
 
-    const result: LightRagQueryResponse = await postJson(
+    const result: LightRagQueryDataResponse = await postJson(
       this.baseUrl,
       this.apiKey,
       "/query/data",
@@ -175,41 +231,46 @@ export class AdapterClient {
       `mode=${this.queryMode}`,
     );
 
-    // Build context items from the response text + optional references
+    // Build context items from /query/data response: entities, relationships, chunks
     const contextItems: AdapterContextItem[] = [];
 
-    if (result && typeof result === "object" && !Array.isArray(result)) {
-      if (result.response && typeof result.response === "string") {
-        contextItems.push({ text: result.response });
-      }
-
-      if (Array.isArray(result.references)) {
-        for (const ref of result.references) {
-          if (Array.isArray(ref.content)) {
-            for (const text of ref.content) {
-              contextItems.push({ text, docId: ref.file_path || ref.reference_id });
-            }
-          }
+    // Parse entities
+    if (Array.isArray(result.data?.entities)) {
+      for (const entity of result.data.entities) {
+        const text = entity.description || entity.entity_name || "";
+        if (text) {
+          contextItems.push({ text, docId: entity.file_path || entity.reference_id });
         }
       }
-    } else if (Array.isArray(result)) {
-      // Fallback if LightRAG /query/data returns a direct array of chunks
-      for (const item of result) {
-        if (typeof item === "string") {
-           contextItems.push({ text: item });
-        } else if (item && typeof item === "object" && item.content) {
-           contextItems.push({ text: String(item.content) });
-        }
-      }
-    } else if (typeof result === "string") {
-      contextItems.push({ text: result });
     }
 
-    const refCount = Array.isArray((result as any)?.references) ? (result as any).references.length : 0;
-    const responseChars = typeof (result as any)?.response === "string" ? (result as any).response.length : 0;
+    // Parse relationships
+    if (Array.isArray(result.data?.relationships)) {
+      for (const rel of result.data.relationships) {
+        const text = rel.description || "";
+        if (text) {
+          contextItems.push({ text, docId: rel.file_path || rel.reference_id });
+        }
+      }
+    }
+
+    // Parse chunks
+    if (Array.isArray(result.data?.chunks)) {
+      for (const chunk of result.data.chunks) {
+        const text = chunk.content || "";
+        if (text) {
+          contextItems.push({ text, docId: chunk.file_path || chunk.reference_id });
+        }
+      }
+    }
+
+    const refCount = Array.isArray(result.data?.references) ? result.data.references.length : 0;
+    const entityCount = Array.isArray(result.data?.entities) ? result.data.entities.length : 0;
+    const relCount = Array.isArray(result.data?.relationships) ? result.data.relationships.length : 0;
+    const chunkCount = Array.isArray(result.data?.chunks) ? result.data.chunks.length : 0;
 
     this.logger?.debug(
-      `[lightrag] query result responseChars=${responseChars} references=${refCount} contextItems=${contextItems.length}`,
+      `[lightrag] query result status=${result.status} entities=${entityCount} relations=${relCount} chunks=${chunkCount} references=${refCount} contextItems=${contextItems.length}`,
     );
 
     return { raw: result, contextItems };

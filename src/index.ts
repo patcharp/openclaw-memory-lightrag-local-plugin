@@ -109,9 +109,19 @@ const memoryPlugin = {
               source: "adapter",
             }));
 
+            // Stringify results เป็น text เพื่อป้องกัน [Object Object]
+            const resultsText = results.map((r, i) => {
+              const snippetText = typeof r.snippet === 'string' ? r.snippet : JSON.stringify(r.snippet);
+              return `[${i + 1}] ${snippetText}\n    Source: ${r.source} | Path: ${r.path} | Score: ${r.score}`;
+            }).join('\n');
+            
+            const outputText = resultsText 
+              ? `Found ${results.length} result(s):\n${resultsText}`
+              : 'No results found.';
+            
             return {
-              content: [{ type: "text", text: JSON.stringify({ results, provider: "lightrag-local" }, null, 2) }],
-              details: { results },
+              content: [{ type: "text", text: outputText }],
+              details: { results, provider: "lightrag-local" },
             };
           } catch (err) {
             return {

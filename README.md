@@ -16,7 +16,7 @@ This plugin integrates a **LightRAG Server** directly into OpenClaw as a memory 
 ```
 OpenClaw Gateway
   └─ memory-lightrag-local plugin
-       ├─ recall  → POST http://<host>:9621/query
+       ├─ recall  → POST http://<host>:9621/query/data  (raw retrieval, bypass LLM)
        └─ ingest  → POST http://<host>:9621/documents/texts
 ```
 

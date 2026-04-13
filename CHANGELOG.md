@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-04-13
+
+### Fixed
+
+- **POST /query/data error 500**: Updated request schema to match LightRAG Server's `QueryDataResponse` specification. Removed redundant `only_need_context` parameter (the `/query/data` endpoint already bypasses LLM by design).
+- **JSON truncated in debug logs**: Changed debug logging to display recalled context as plain text instead of JSON objects. Debug mode now shows readable text preview; normal mode suppresses detailed output.
+- **`[Object Object]` in memory_search output**: Tool results are now stringified to readable text format, showing snippet, source, path, and score for each result.
+
+### Changed
+
+- **adapter-client.ts**: Rewrote `/query/data` request/response handling with proper TypeScript interfaces (`LightRagQueryDataRequest`, `LightRagQueryDataResponse`). Response parsing now extracts entities, relationships, and chunks from the structured data response.
+- **src/index.ts**: `memory_search` tool output format changed from JSON to human-readable text list.
+- **src/hooks/recall.ts**: Debug context preview now displays as single-line text (newlines replaced with spaces) for better log readability.
+
+### Technical
+
+- Added full TypeScript type definitions for LightRAG `/query/data` endpoint:
+  - `LightRagQueryDataEntity` — knowledge graph entities
+  - `LightRagQueryDataRelationship` — entity relationships
+  - `LightRagQueryDataChunk` — text chunks from vector search
+  - `LightRagQueryDataReference` — source references
+  - `LightRagQueryDataMetadata` — query metadata and processing info
 
 ## [0.3.1] - 2026-04-13
 

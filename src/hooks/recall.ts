@@ -111,10 +111,10 @@ export function buildRecallHandler(params: {
         `memory-lightrag-local: recall inject conv=${conversationId || "*"} contextItems=${result.contextItems.length} chars=${context.length} elapsed=${elapsedMs}ms firstSnippet=${snippet}`,
       );
 
+      // Debug mode: แสดง context preview เป็น text (ไม่ print object)
       if (cfg.debug) {
-        logger.debug(
-          `memory-lightrag-local: recall context preview: ${context.slice(0, 300).replace(/\n/g, "↵")}`,
-        );
+        const previewText = context.slice(0, 500).replace(/\n/g, " ");
+        logger.debug(`memory-lightrag-local: recall context preview: ${previewText}`);
       }
 
       return { prependContext: context };
